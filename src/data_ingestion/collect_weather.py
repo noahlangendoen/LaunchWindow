@@ -13,7 +13,7 @@ class WeatherCollector:
         if not self.api_key:
             raise ValueError("API key for OpenWeather is not set in the environment variables.")
         
-        self.base_url = "https://api.openweathermap.org/data/2.5/onecall"
+        self.base_url = "https://api.openweathermap.org/data/2.5"
 
         self.session = requests.Session()
 
@@ -151,4 +151,79 @@ class WeatherCollector:
             print(f"Error fetching forecast for {site_key}: {e}")
             return []
         
+    def collect_weather_data(self):
+        """Collect current weather data for all sites."""
+        weather_data = []
+        print("Collecting current weather data...")
+
+        for key in self.sites.keys():
+            print(f"Fetching data for {self.sites[key]['name']}...")
+            data = self.get_current_weather(key)
+            if data:
+                weather_data.append(data)
+                print(f"Data for {self.sites[key]['name']} collected successfully.")
+            else:
+                print(f"Failed to fetch data for {self.sites[key]['name']}")
+
+            time.sleep(1)
+        return weather_data
+    
+    def collect_forecast_data(self):
+        """Collect 5-day weather forecast data for all sites."""
+        forecast_data = []
+        print("Collecting 5-day weather forecast data for all sites...")
+
+        for key in self.sites.keys():
+            print(f"Fetching forecast data for {self.sites[key]['name']}...")
+            data = self.get_forecast(key)
+            if data:
+                forecast_data.extend(data)
+                print(f"Forecast data for {self.sites[key]['name']} collected successfully.")
+            else:
+                print(f"Failed to fetch forecast data for {self.sites[key]['name']}")
+
+            time.sleep(1)
+
+        return forecast_data
+    
+    def save_to_csv(self, data, filename):
+        """Save collected data to a CSV file."""
+        if not data:
+            print("No data to save.")
+            return
         
+        os.makedirs("data/raw", exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filepath = f"data/raw/{filename}_{timestamp}.csv"
+
+        df = pd.DataFrame(data)
+        df.to_csv(filepath, index=False)
+
+        print(f"{len(data)} records saved to {filepath}.")
+
+        if 'site_code' in df.columns:
+            print(F"Sites covered: {', '.join(df['site_code'].unique())}")
+
+def main():
+    try:
+        collector = WeatherCollector()
+
+        # Collect current weather data
+        current_weather_data = collector.collect_weather_data()
+        if current_weather_data:
+            collector.save_to_csv(current_weather_data, "current_weather")
+
+        # Collect 5-day weather forecast data
+        forecast_data = collector.collect_forecast_data()
+        if forecast_data:
+            collector.save_to_csv(forecast_data, "weather_forecast")
+
+        return True
+
+    except Exception as e:
+        print(f"An error occurred in weather collection: {e}")
+        return False
+    
+if __name__ == "__main__":
+    main()
