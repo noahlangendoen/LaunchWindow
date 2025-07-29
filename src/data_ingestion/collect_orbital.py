@@ -61,6 +61,59 @@ class TLECollector:
         
         return tle_records
     
+
+    # Helper function taken from online to parse scientific notation in TLE format
+    def parse_scientific_notation(self, sci_str):
+        """Parse TLE scientific notation format like '00000+0' or '12345-3'"""
+        if not sci_str or sci_str.strip() == '':
+            return 0.0
+        
+        sci_str = sci_str.strip()
+        
+        # Handle the special case of all zeros
+        if sci_str in ['00000+0', '00000-0', '+00000+0', '-00000+0']:
+            return 0.0
+        
+        try:
+            # Find the sign and exponent
+            if '+' in sci_str:
+                mantissa_str, exp_str = sci_str.split('+')
+                exponent = int(exp_str)
+            elif '-' in sci_str[-2:]:  # Look for minus in last 2 characters (exponent part)
+                mantissa_str = sci_str[:-2]
+                exp_str = sci_str[-2:]
+                if exp_str.startswith('-'):
+                    exponent = int(exp_str)
+                else:
+                    # Handle case where mantissa is negative
+                    mantissa_str = sci_str[:-1]
+                    exponent = int(sci_str[-1])
+            else:
+                # No explicit exponent, treat as regular number
+                return float(sci_str)
+            
+            # Parse mantissa
+            mantissa = float(mantissa_str) if mantissa_str else 0.0
+            
+            # Handle the special TLE format where mantissa needs decimal point
+            if abs(mantissa) >= 1:
+                # Add decimal point after first digit for TLE format
+                mantissa_str = str(int(abs(mantissa)))
+                if len(mantissa_str) > 1:
+                    mantissa = float(mantissa_str[0] + '.' + mantissa_str[1:])
+                    if sci_str.startswith('-'):
+                        mantissa = -mantissa
+                else:
+                    mantissa = float(mantissa_str)
+                    if sci_str.startswith('-'):
+                        mantissa = -mantissa
+            
+            result = mantissa * (10 ** exponent)
+            return result
+            
+        except (ValueError, IndexError):
+            return 0.0
+    
     def parse_tle_record(self, name, line1, line2, source_name):
         """Parse a single TLE record."""
         try:
@@ -72,9 +125,9 @@ class TLECollector:
             launch_piece = line1[14:17].strip()
             epoch_year = int(line1[18:20]) + (2000 if int(line1[18:20]) < 57 else 1900) # Adjust for 21st century
             epoch_day = float(line1[20:32].strip())
-            mean_motion_derivative = float(line1[33:43].strip()) if line1[33:43].strip() else 0.0
-            mean_motion_second_derivative = float(line1[44:52].strip()) if line1[44:52].strip() else 0.0
-            drag_term = float(line1[53:61].strip()) if line1[53:61].strip() else 0.0
+            mean_motion_derivative = self.parse_scientific_notation(line1[33:43])
+            mean_motion_second_derivative = self.parse_scientific_notation(line1[44:52])
+            drag_term = self.parse_scientific_notation(line1[53:61])
             element_set_num = int(line1[64:68])
 
             # Parse line2
