@@ -192,6 +192,7 @@ class WeatherCollector:
             print("No data to save.")
             return
         
+        # Ensure the data directory exists
         os.makedirs("data/raw", exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

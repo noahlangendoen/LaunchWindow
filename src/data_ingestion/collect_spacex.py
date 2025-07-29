@@ -114,7 +114,9 @@ class spaceXLaunchCollector:
         
         df = pd.DataFrame(launches)
 
+        # Ensure the data directory exists
         os.makedirs("data/raw", exist_ok=True)
+        
         filepath = f"data/raw/{filename}"
 
         df.to_csv(filepath, index=False)
