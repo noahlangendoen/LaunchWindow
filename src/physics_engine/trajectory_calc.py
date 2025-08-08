@@ -17,7 +17,7 @@ class VehicleSpecs:
     drag_coefficient: float
     cross_sectional_area_m2: float
     max_dynamic_pressure_pa: float
-    max_acceleartion_g: float
+    max_acceleration_g: float
     stage_count: int
 
 @dataclass
@@ -204,11 +204,11 @@ class TrajectoryCalculator:
         final_state = StateVector(
             position=trajectory_points[-1].position,
             velocity=trajectory_points[-1].velocity,
-            mass=trajectory_points[-1].mass_kg
+            timestamp=trajectory_points[-1].timestamp
         )
 
         try:
-            final_orbit = self.orbital_mechanics.cartesian_to_keplerian(final_state)
+            final_orbit = self.orbital_mechanics.cartesian_to_kepler(final_state)
             final_orbit_dict = {
                 'semi_major_axis_km': final_orbit.semi_major_axis,
                 'eccentricity': final_orbit.eccentricity,
@@ -217,7 +217,7 @@ class TrajectoryCalculator:
                 'perigee_km': final_orbit.semi_major_axis * (1 - final_orbit.eccentricity) - self.EARTH_RADIUS_KM,
             }
 
-            mission_success = (final_orbit_dict['perigree_km'] > target_altitude * 0.9 and abs(final_orbit.inclination - target_inclination < 5))
+            mission_success = (final_orbit_dict['perigee_km'] > target_altitude * 0.9 and abs(final_orbit.inclination - target_inclination < 5))
         except:
             final_orbit_dict = None
             mission_success = False

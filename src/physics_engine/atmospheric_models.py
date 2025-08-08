@@ -165,8 +165,8 @@ class AtmosphericModels:
         if altitude_m < 11000:
             # Power law wind profile
             wind_exponent = 0.143  # Typical for open terrain
-            wind_Factor = (altitude_m / 10) ** wind_exponent if altitude_m > 10 else 1.0
-            adjusted_wind_speed = wind_speed * wind_Factor
+            wind_factor = (altitude_m / 10) ** wind_exponent if altitude_m > 10 else 1.0
+            adjusted_wind_speed = wind_speed * wind_factor
         else:
             # Jet stream effects above troposphere
             if 9000 < altitude_m < 15000:
@@ -210,7 +210,7 @@ class AtmosphericModels:
         if relative_velocity > 0:
             drag_direction = math.degrees(math.atan2(-relative_velocity_y, -relative_velocity_x))
         else:
-            drag_direciton = 0
+            drag_direction = 0
 
         # Drag acceleration assuming mass is handled elsewhere
         drag_acceleration = drag_magnitude
@@ -229,7 +229,7 @@ class AtmosphericModels:
         mach_number = velocity_ms / speed_of_sound
         return mach_number if mach_number >= 0 else 0.0
     
-    def claculate_reynolds_number(self, velocity_ms: float, characteristic_length_m: float, atmospheric_conditions: AtmosphericConditions) -> float:
+    def calculate_reynolds_number(self, velocity_ms: float, characteristic_length_m: float, atmospheric_conditions: AtmosphericConditions) -> float:
         """Calculate the Reynolds number for flow analysis."""
         # Dynamic viscosity of air (approximation via Sutherland's formula)
         T = atmospheric_conditions.temperature_k

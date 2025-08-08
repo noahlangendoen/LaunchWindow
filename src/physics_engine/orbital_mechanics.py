@@ -162,8 +162,8 @@ class OrbitalMechanics:
             epoch=state.timestamp
         )
     
-    def propogate_orbit(self, state: StateVector, time_delta: timedelta) -> StateVector:
-        """Propogate an orbit forward in time usign simplified perturbations."""
+    def propagate_orbit(self, state: StateVector, time_delta: timedelta) -> StateVector:
+        """Propagate an orbit forward in time usign simplified perturbations."""
         elements = self.cartesian_to_kepler(state)
 
         # Mean motion
@@ -218,7 +218,7 @@ class OrbitalMechanics:
         nu = 2 * math.atan(math.sqrt((1 + e) / (1 - e)) * math.tan(E / 2))
         return nu
     
-    def calculate_ground_track(self, elements: OrbitalElements, duration_hours: float = 24) -> List[Tuple[datetime, float, float]]:
+    def calculate_ground_track(self, elements: OrbitalElements, duration_hours: float = 24) -> List[Tuple[float, float]]:
         """Calculate the ground track of the orbit over a specified duration."""
         points = []
         time_step = timedelta(minutes = 5)
@@ -230,32 +230,32 @@ class OrbitalMechanics:
         while current_time <= end_time:
             # Propagate the orbit
             dt = current_time - elements.epoch
-            current_state = self.propogate_orbit(state, dt)
+            current_state = self.propagate_orbit(state, dt)
 
             # Convert latitude and longitude
-            lat, lon = self.cartesion_to_geodetic(current_state.position, current_time)
+            lat, lon = self.cartesian_to_geodetic(current_state.position, current_time)
             points.append((lat, lon))
 
             current_time += time_step
 
         return points
     
-    def cartesion_to_geodetic(self, position: np.ndarray, timestamp: datetime) -> Tuple[float, float]:
+    def cartesian_to_geodetic(self, position: np.ndarray, timestamp: datetime) -> Tuple[float, float]:
         """Convert Cartesian coordinates to geodetic coordinates (latitude, longitude)."""
         x, y, z = position
         
         gmst = self.calculate_gmst(timestamp)
 
         # Convert to rotating Earth frame
-        con_gmst, sin_gmst = math.cos(gmst), math.sin(gmst)
-        x_earth = con_gmst * x + sin_gmst * y
-        y_earth = -sin_gmst * x + con_gmst * y
+        cos_gmst, sin_gmst = math.cos(gmst), math.sin(gmst)
+        x_earth = cos_gmst * x + sin_gmst * y
+        y_earth = -sin_gmst * x + cos_gmst * y
         z_earth = z
 
         # Calculate latitude and longitude
         r_earth = math.sqrt(x_earth**2 + y_earth**2)
-        lat = math.atan2(z_earth, r_earth)
-        lon = math.atan2(y_earth, x_earth)
+        lat = math.degrees(math.atan2(z_earth, r_earth))
+        lon = math.degrees(math.atan2(y_earth, x_earth))
 
         # Normalize longitude to [-180, 180]
         lon = ((lon + 180) % 360) - 180
@@ -309,7 +309,7 @@ class OrbitalMechanics:
             for i, state in enumerate(launch_trajectory):
                 # Propagate debris state
                 dt = state.timestamp - debris.epoch
-                debris_state = self.propogate_orbit(self.kepler_to_cartesian(debris), dt)
+                debris_state = self.propagate_orbit(self.kepler_to_cartesian(debris), dt)
 
                 # Calculate closest approach
                 distance = np.linalg.norm(state.position - debris_state.position)
