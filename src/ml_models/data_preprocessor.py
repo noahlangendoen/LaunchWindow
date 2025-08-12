@@ -453,3 +453,227 @@ class DataPreprocessor:
     
     def _integrate_orbital_features(self, df_launches: pd.DataFrame, df_orbital: pd.DataFrame) -> pd.DataFrame:
         df_integrated = df_launches.copy()
+
+        if 'launch_datetime' not in df_launches.columns:
+            return df_integrated
+        
+        # Calculate orbital congestion features
+        df_integrated['orbital_object_count'] = len(df_orbital)
+
+        # Categorize orbital object by altitude
+        if 'approximate_altitude_km' in df_orbital.columns:
+            leo_objects = len(df_orbital[df_orbital['approximate_altitude_km'] < 2000])
+            meo_objects = len(df_orbital[df_orbital['approximate_altitude_km'] >= 2000 & 
+                              df_orbital['approximate_altitude_km'] < 35786])
+            geo_objects = len(df_orbital[df_orbital['approximate_altitude_km'] >= 35786])
+
+            df_integrated['leo_objects_count'] = leo_objects
+            df_integrated['meo_objects_count'] = meo_objects
+            df_integrated['geo_objects_count'] = geo_objects
+
+            df_integrated['orbital_congestion_score'] = leo_objects * 0.6 + meo_objects * 0.3 + geo_objects * 0.1
+
+        return df_integrated
+    
+    def create_training_dataset(self, target_column: str = 'success') -> Tuple[pd.DataFrame, pd.Series]:
+        """Create a complete training dataset for machine learning."""
+        if not self.processed_data:
+            print("No data loaded. Please run load_all_data() first.")
+            return None, None
+        
+        # Start with launch data as the base
+        launch_data = None
+        for key, df in self.processed_data.items():
+            if 'launch' in key.lower():
+                if launch_data is None:
+                    launch_data = df.copy
+                else:
+                    # Combine multiple launch datasets
+                    launch_data = pd.concat([launch_data, df], ignore_index=True, sort=False)
+
+        if launch_data is None:
+            print("No launch data found.")
+            return None, None
+        
+        # Clean launch data
+        launch_data = self.clean_launch_data(launch_data)
+
+        # Get weather and orbital data
+        weather_data = self.processed_data.get('weather_current') or self.processed_data.get('weather_forecast')
+        orbital_data = self.processed_data.get('orbital_data')
+
+        if weather_data is not None:
+            weather_data = self.clean_weather_data(weather_data)
+        if orbital_data is not None:
+            orbital_data = self.clean_orbital_data(orbital_data)
+
+        # Engineer features
+        df_features = self.engineer_features(launch_data, weather_data, orbital_data)
+
+        # Prepare features and target
+        X = df_features.drop(columns=[target_column])
+        y = df_features[target_column]
+
+        # Select only numeric and categorical features for ML
+        categorical_cols = X.select_dtypes(include=['object', 'category']).columns
+        numeric_cols = X.select_dtypes(include=[np.number]).columns
+
+        # One-hot encode categorical vals
+        X_encoded = pd.get_dummies(X[categorical_cols], prefix_sep='_')
+        X_final = pd.concat([X[numeric_cols], X_encoded], axis=1)
+
+        # Handle remaining missing values
+        X_final = X_final.fillna(X_final.mean())
+
+        print(f"Training set with {len(X_final)} samples and {len(X_final.columns)} features.")
+
+        return X_final, y
+    
+    def generate_data_report(self) -> Dict:
+        """Generate a comprehensive data quality and preprocessing report."""
+        if not self.processed_data:
+            return {'error': 'No data loaded.'}
+        
+        report = {
+            'datasets_loaded': list(self.processed_data.keys()),
+            'total_records': sum(len(df) for df in self.processed_data.values()),
+            'quality_reports': {},
+            'feature_summary': {},
+            'recommendations': []
+        }
+
+        # Analyze each dataset
+        for name, df in self.processed_data.items():
+            quality_report = self.analyze_data_quality(df, name)
+            report['quality_reports'][name] = {
+                'total_records': quality_report.total_records,
+                'missing_values': quality_report.missing_values,
+                'duplicate_records': quality_report.duplicate_records,
+                'completeness_score': quality_report.completeness_score,
+                'overall_quality': quality_report.overall_quality
+            }
+
+            # Feature summary
+            report['feature_summary'][name] = {
+                'columns': list(df.columns),
+                'numeric_columns': list(df.select_dtypes(include=[np.number]).columns),
+                'categorical_columns': list(df.select_dtypes(include=['object', 'category']).columns),
+                'datetime_columns': list(df.select_dtypes(include=['datetime64']).columns)
+            }
+
+        # Generate recommendations
+        recommendations = []
+
+        for name, quality in report['quality_reports'].items():
+            if quality['overall_quality'] == 'POOR':
+                recommendations.append(f"Dataset {name} has poor data quality. Consider data validation and cleaning.")
+            
+            if quality['duplicate_records'] > 0:
+                recommendations.append(f"Dataset {name} contains {quality['duplicate_records']} duplicate records.")
+            
+            if len(quality['missing_values']) > 0:
+                high_missing = [col for col, count in quality['missing_values'].items()
+                                if count > quality['total_records'] * 0.3]
+                if high_missing:
+                    recommendations.append(f"Dataset {name} has high missing values in columns: {high_missing}")
+
+        # Data integration recommendations
+        has_launch_data = any('launch' in key.lower() for key in self.processed_data.keys())
+        has_weather_data = any('weather' in key.lower() for key in self.processed_data.keys())
+        has_orbital_data = any('orbital' in key.lower() or 'tle' in key.lower() for key in self.processed_data.keys())
+
+        if has_launch_data:
+            if has_weather_data:
+                recommendations.append("Weather and launch data available - integrate for weather-based predictions.")
+            if has_orbital_data:
+                recommendations.append("Orbital and launch data available - analyze orbital congestion effects.")
+        else:
+            recommendations.append("No launch data found - required for prediction models.")
+
+        report['recommendations'] = recommendations
+
+        return report
+    
+    def save_processed_data(self, output_dir: str="data/processed"):
+        """Save all processed datasets."""
+        os.makedirs(output_dir, exist_ok=True)
+
+        for name, df in self.processed_data.items():
+            filename = f"{name}_processed.csv"
+            filepath = os.path.join(output_dir, filename)
+            df.to_csv(filepath, index=False)
+            print(f"Saved {filename}.")
+        
+        metadata = {
+            'feature_mappings': self.feature_mappings,
+            'quality_reports': {name: {
+                'total_records': report.total_records,
+                'missing_values': report.missing_values,
+                'duplicate_records': report.duplicate_records,
+                'completeness_score': report.completeness_score,
+                'consistency_score': report.consistency_score,
+                'overall_quality': report.overall_quality
+            } for name, report in self.quality_reports.items()}
+        }
+
+        metadata_path = os.path.join(output_dir, 'preprocessing_metadata.json')
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+        print(f"Preprocessing metadata saved to {metadata_path}.")
+
+    def load_processed_data(self, input_dir: str="data/processed") -> Dict[str, pd.DataFrame]:
+        """Load previously processed datasets."""
+        processed_data = {}
+
+        if not os.path.exists(input_dir):
+            print(f"Processed data not found in {input_dir}.")
+
+        for filename in os.listdir(input_dir):
+            if filename.endswith('_processed.csv'):
+                filepath = os.path.join(input_dir, filename)
+                dataset_name = filename.replace('_processed.csv', '')
+
+                try:
+                    df = pd.read_csv(filepath)
+                    processed_data[dataset_name] = df
+                except Exception as e:
+                    print(f"Error loading {filename}: e")
+
+        # Load metadata if available
+        metadata_path = os.path.join(input_dir, 'preprocessing_metadata.json')
+        if os.path.exists(metadata_path):
+            with open(metadata_path, 'r') as f:
+                metadata = json.load(f)
+                self.feature_mappings = metadata.get('feature_mappings', {})
+        
+        self.processed_data = processed_data
+        return processed_data
+    
+def main():
+    preprocessor = DataPreprocessor()
+    
+    # Load all data
+    datasets = preprocessor.load_all_data()
+
+    if datasets:
+        # Generate quality report
+        report = preprocessor.generate_data_report()
+        print("Data Quality Report:")
+        for dataset, quality in report['quality_reports'].items():
+            print(f" {dataset}: {quality['total_records']} records, {quality['overall_quality']} quality.")
+
+        # Create training dataset
+        X, y = preprocessor.create_training_dataset()
+
+        if X is not None:
+            print(f"\nTraining dataset: {len(X)} samples, {len(X.columns)} features.")
+            print(f"Success rate: {y.mean():.1%}" if y is not None else "No target available.")
+        
+        preprocessor.save_processed_data()
+    else:
+        print("No data found. Please run your data collectors first.")
+
+
+if __name__ == "__main__":
+    main()
