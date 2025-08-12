@@ -1,0 +1,455 @@
+import pandas as pd
+import numpy as np
+import os
+import re
+import json
+from datetime import datetime, timedelta
+from typing import Dict, List, Tuple, Optional, Union
+from dataclasses import dataclass
+import warnings
+warnings.filterwarnings('ignore')
+
+@dataclass
+class DataQuality:
+    """Class used to measure the quality of a dataset."""
+    total_records: int
+    missing_values: Dict[str, int]
+    duplicate_records: int
+    outliers: int
+    completeness_score: float
+    consistency_score: float
+    overall_quality: str
+
+class DataPreprocessor:
+    """Class to do the data preprocessing for rocket launch project."""
+    def __init__(self, data_dir="data/raw"):
+        self.data_dir = data_dir
+        self.processed_data = {}
+        self.feature_mappings = {}
+        self.quality_reports = {}
+
+        # Standard feature engineering configurations
+        self.weather_features = [
+            'temperature_c', 'pressure_hpa', 'humidity_percent',
+            'wind_speed_ms', 'wind_direction_deg', 'wind_gust_ms',
+            'cloud_cover_percent', 'visibility_m', 'precipitation_probability_percent'
+        ]
+
+        self.launch_features = [
+            'rocket_name', 'rocket_family', 'launch_provider', 'pad_name',
+            'mission_type', 'payload_mass_kg', 'success'
+        ]
+
+        self.orbital_features = [
+            'inclination_deg', 'eccentricity', 'mean_motion', 'orbital_period_minutes',
+            'approximate_altitude_km'
+        ]
+
+    def load_all_data(self) -> Dict[str, pd.DataFrame]:
+        """Load all available data files from the data directory"""
+        data_files = {}
+
+        if not os.path.exists(self.data_dir):
+            print(f"The directory {self.data_dir} does not exist.")
+            return data_files
+        
+        # Find all csv files
+        for filename in os.listdir(self.data_dir):
+            if filename.endswith('.csv'):
+                filepath = os.path.join(self.data_dir, filename)
+
+                try:
+                    df = pd.read_csv(filepath)
+                    low_term = filename.lower()
+
+                    if 'launch' in low_term:
+                        if 'nasa' in low_term:
+                            data_files['nasa_launches'] = df
+                        elif 'spacex' in low_term:
+                            data_files['spacex_launches'] = df
+                        else:
+                            data_files['launches'] = df
+                    elif 'weather' in low_term:
+                        if 'forecast' in low_term:
+                            data_files['weather_forecast'] = df
+                        else:
+                            data_files['weather_current'] = df
+                    elif 'tle' in low_term:
+                        data_files['orbital_data'] = df
+                    else:
+                        # Generic categorization just in case
+                        base_name = filename.replace('.csv', '').split('_')[0]
+                        data_files[base_name] = df
+                    
+                    print(f"Loaded {filename}: {len(df)} records")
+                
+                except Exception as e:
+                    print(f"Error loading {filename}: {e}")
+
+        self.processed_data = data_files
+
+        return data_files
+    
+    def analyze_data_quality(self, df: pd.DataFrame, dataset_name: str) -> DataQuality:
+        """Analyze the quality of a dataset."""
+        total_records = len(df)
+
+        # Missing values
+        missing_values = df.isnull().sum().to_dict()
+        missing_values = {k: v for k, v in missing_values.items() if v > 0}
+
+        # Duplicate records
+        duplicate_records = df.duplicated().sum()
+
+        # Outliers detection (using IQR for numeric columns)
+        outliers_count = 0
+        numeric_columns = df.select_dtypes(include=[np.number]).columns
+
+        for column in numeric_columns:
+            if df[column].notna().sum() > 0:
+                Q1 = df[column].quantile(0.25)
+                Q3 = df[column].quantile(0.75)
+                IQR = Q3 - Q1
+                lower_bound = Q1 - 1.5 * IQR
+                upper_bound = Q3 + 1.5 * IQR
+                outliers_count += ((df[column] < lower_bound) | (df[column] > upper_bound)).sum()
+        
+        # Completeness score as percentage
+        completeness_score = (1 - df.isnull().sum().sum() / (len(df) * len(df.columns))) * 100
+
+        # Consistency score as int in range 0 to 100 (approx percentage)
+        consistency_issues = 0
+        for column in df.columns:
+            if 'date' in column.lower() or 'time' in column.lower():
+                # Check valid date formats
+                try:
+                    pd.to_datetime(df[column], errors='coerce')
+                except:
+                    consistency_issues += 1
+        
+        consistency_score = max(0, 100 - consistency_issues * 10)
+
+        # Overall quality assessment
+        overall_score = (completeness_score + consistency_score) / 2
+        if overall_score >= 90:
+            overall_quality = 'EXCELLENT'
+        elif overall_score >= 75:
+            overall_quality = 'GOOD'
+        elif overall_score >= 60:
+            overall_quality = 'FAIR'
+        else:
+            overall_quality = 'POOR'
+
+        quality_report = DataQuality(
+            total_records=total_records,
+            missing_values=missing_values,
+            duplicate_records=duplicate_records,
+            outliers=outliers_count,
+            completeness_score=completeness_score,
+            consistency_score=consistency_score,
+            overall_quality=overall_quality
+        )
+    
+        self.quality_reports[dataset_name] = quality_report
+        return quality_report
+    
+    def clean_launch_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Clean and standardize launch data."""
+        df_cleaned = df.copy()
+
+        # Standardize date columns
+        date_columns = [col for col in df_cleaned.columns if 'date' in col.lower() or 'time' in col.lower()]
+        for col in date_columns:
+            df_cleaned[col] = pd.to_datetime(df_cleaned[col], errors='coerce')
+        
+        # Standardize success indicators
+        if 'success' in df_cleaned.columns:
+            # Convert various success labels to boolean
+            df_cleaned['success'] = df_cleaned['success'].map({
+                True: True, False: False, 'true': True, 'false': False,
+                'True': True, 'False': False, 1: True, 0: False,
+                'SUCCESS': True, 'FAILURE': False, 'SUCCESS COMPLETE': True
+            })
+
+        # Clean launch provider names
+        if 'launch_provider' in df_cleaned.columns:
+            df_cleaned['launch_provider'] = df_cleaned['launch_provider'].str.strip().str.title()
+            # Standardize common providers
+            provider_mapping = {
+                'Spacex': 'SpaceX',
+                'Space X': 'SpaceX',
+                'National Aeronautics and Space Administration': 'NASA',
+                'Nasa': 'NASA',
+                'United Launch Alliance': 'ULA'
+            }
+        
+            df_cleaned['launch_provider'] = df_cleaned['launch_provider'].replace(provider_mapping)
+
+        # Clean mission types
+        if 'mission_type' in df_cleaned.columns:
+            df_cleaned['mission_type'] = df_cleaned['mission_type'].str.strip().str.title()
+            df_cleaned['mission_type'] = df_cleaned['mission_type'].fillna('Unknown')
+        
+        # Convert payload mass to numeric
+        if 'payload_mass_kg' in df_cleaned.columns:
+            df_cleaned['payload_mass_kg'] = pd.to_numeric(df_cleaned['payload_mass_kg'], errors='coerce')
+
+        # Remove duplicates
+        df_cleaned = df_cleaned.drop_duplicates()
+
+        return df_cleaned
+    
+    def clean_weather_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Clean and standardize weather data."""
+        df_cleaned = df.copy()
+
+        # Convert temperature columns
+        temp_columns = [col for col in df_cleaned.columns if 'temp' in col.lower()]
+        for col in temp_columns:
+            df_cleaned[col] = pd.to_numeric(df_cleaned[col], errors='coerce')
+        
+        # Clean wind data
+        wind_columns = [col for col in df_cleaned.columns if 'wind' in col.lower()]
+        for col in wind_columns:
+            df_cleaned[col] = pd.to_numeric(df_cleaned[col], errors='coerce')
+            # Remove negative wind speeds
+            if 'speed' in col.lower():
+                df_cleaned[col] = df_cleaned[col].clip(lower=0)
+            # Normalize wind direciton to 0 to 360 degrees
+            if 'direction' in col.lower():
+                df_cleaned[col] = df_cleaned[col] % 360
+        
+        # Clean pressure data
+        if 'pressure_hpa' in df_cleaned.columns:
+            df_cleaned['pressure_hpa'] = pd.to_numeric(df_cleaned['pressure_hpa'], errors='coerce')
+            # Remove unrealistic pressure values
+            df_cleaned['pressure_hpa'] = df_cleaned['pressure_hpa'].clip(lower=800, upper=1100)
+        
+        # Clean humidity data
+        if 'humidity_percent' in df_cleaned.columns:
+            df_cleaned['humidity_percent'] = pd.to_numeric(df_cleaned['humidity_percent'], errors='coerce')
+            df_cleaned['humidity_percent'] = df_cleaned['humidity_percent'].clip(lower=0, upper=100)
+        
+        # Standardize site codes
+        if 'site_code' in df_cleaned.columns:
+            df_cleaned['site_code'] = df_cleaned['site_code'].str.strip().str.upper()
+
+        # Handle datetime columns
+        datetime_columns = [col for col in df_cleaned.columns if any(keyword in col.lower() for keyword in ['dt', 'time', 'date'])]
+        for col in datetime_columns:
+            df_cleaned[col] = pd.to_datetime(df_cleaned[col], errors='coerce')
+
+        return df_cleaned
+    
+    def clean_orbital_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Clean and standardize orbital/TLE data"""
+        df_cleaned = df.copy()
+
+        # Clean satellite names
+        if 'name' in df_cleaned.columns:
+            df_cleaned['name'] = df_cleaned['name'].str.strip().str.upper()
+
+        # Convert orbital elements to numeric
+        orbital_numeric_columns = [
+            'inclination_deg', 'eccentricity', 'mean_motion', 'orbital_period_minutes',
+            'approximate_altitude_km', 'right_ascension_deg', 'argument_of_perigee_deg'
+        ]
+
+        for col in orbital_numeric_columns:
+            if col in df_cleaned.columns:
+                df_cleaned[col] = pd.to_numeric(df_cleaned[col], errors='coerce')
+
+        # Validate orbital elements ranges
+        if 'inclination_deg' in df_cleaned.columns:
+            df_cleaned['inclination_deg'] = df_cleaned['inclination_deg'].clip(lower=0, upper=180)
+
+        if 'eccentricity' in df_cleaned.columns:
+            df_cleaned['eccentricity'] = df_cleaned['eccentricity'].clip(lower=0, upper=0.99)
+
+        if 'approximate_altitude_km' in df_cleaned.columns:
+            df_cleaned['approximate_altitude_km'] = df_cleaned['approximate_altitude_km'].clip(lower=150, upper=50000)
+
+        # Handle epoch data
+        if 'epoch_year' in df_cleaned.columns and 'epoch_day' in df_cleaned.columns:
+            try:
+                df_cleaned['epoch_datetime'] = pd.to_datetime(
+                    df_cleaned['epoch_year'].astype(str) + df_cleaned['epoch_day'].astype(str),
+                    format='%Y%j', errors='coerce'
+                )
+            except:
+                pass
+        
+        return df_cleaned
+    
+    def engineer_features(self, launch_df: pd.DataFrame, weather_df: pd.DataFrame = None, orbital_df: pd.DataFrame = None) -> pd.DataFrame:
+        """Create engineered features for machine learning."""
+        df_features = launch_df.copy()
+
+        # Time-based features
+        if 'date_utc' in df_features.columns:
+            df_features['launch_datetime'] = pd.to_datetime(df_features['date_utc'])
+            df_features['launch_year'] = df_features['launch_datetime'].dt.year
+            df_features['launch_month'] = df_features['launch_datetime'].dt.month
+            df_features['launch_day_of_year'] = df_features['launch_datetime'].dt.dayofyear
+            df_features['launch_hour'] = df_features['launch_datetime'].dt.hour
+            df_features['launch_day_of_week'] = df_features['launch_datetime'].dt.dayofweek
+            df_features['launch_season'] = df_features['launch_month'].map({
+                3: 'Spring', 4: 'Spring', 5: 'Spring',
+                6: 'Summer', 7: 'Summer', 8: 'Summer',
+                9: 'Fall', 10: 'Fall', 11: 'Fall',
+                12: 'Winter', 1: 'Winter', 2: 'Winter'
+            })
+
+        # Rocket family features
+        if 'rocket_name' in df_features.columns:
+            df_features['rocket_family'] = df_features['rocket_name'].apply(self._extract_rocket_family)
+            df_features['rocket_version'] = df_features['rocket_name'].apply(self._extract_rocket_version)
+            df_features['is_reusable'] = df_features['rocket_name'].apply(self._is_reusable_rocket)
+
+        # Launch provider features
+        if 'launch_provider' in df_features.columns:
+            df_features['is_commercial'] = df_features['launch_provider'].apply(self._is_commercial_provider)
+            df_features['provider_experience'] = df_features.groupby('launch_provider').cumcount() + 1
+        
+        # Mission complexity features
+        if 'mission_type' in df_features.columns:
+            complexity_mapping = {
+                'Communication': 2, 'Earth Observation': 2, 'Navigation': 3,
+                'Scientific': 4, 'Planetary': 5, 'Crewed': 5,
+                'Cargo': 2, 'Satellite Deployment': 2, 'Unknown': 3
+            }
+            df_features['mission_complexity'] = df_features['mission_type'].map(complexity_mapping).fillna(3)
+        
+        # Payload features (adding bins)
+        if 'payload_mass_kg' in df_features.columns:
+            df_features['payload_mass_kg'] = df_features['payload_mass_kg'].fillna(0)
+            df_features['payload_category'] = pd.cut(
+                df_features['payload_mass_kg'],
+                bins = [0, 1000, 5000, 15000, float('inf')],
+                labels=['Light', 'Medium', 'Heavy', 'Super Heavy'],
+                include_lowest=True
+            )
+        
+        # Weather integration
+        if weather_df is not None:
+            df_features = self._integrate_weather_features(df_features, weather_df)
+        
+        # Orbital traffic integration
+        if orbital_df is not None:
+            df_features = self._integrate_orbital_features(df_features, orbital_df)
+
+        return df_features
+    
+    def _extract_rocket_family(self, rocket_name: str) -> str:
+        """Extract rocket family from rocket name."""
+        if pd.isna(rocket_name):
+            return "Unknown"
+        
+        name = str(rocket_name).upper()
+
+        if 'FALCON' in name:
+            return 'Falcon'
+        elif 'ATLAS' in name:
+            return 'Atlas'
+        elif 'DELTA' in name:
+            return 'Delta'
+        elif 'ANTARES' in name:
+            return 'Antares'
+        elif 'ELECTRON' in name:
+            return 'Electron'
+        elif 'SOYUZ' in name:
+            return 'Soyuz'
+        elif 'ARIANE' in name:
+            return 'Ariane'
+        elif 'SLS' in name:
+            return 'SLS'
+        else:
+            return 'Other'
+        
+    def _extract_rocket_version(self, rocket_name: str) -> str:
+        """Extract version number of rocket"""
+        if pd.isna(rocket_name):
+            return 'Unkown'
+        
+        # Look for version patterns like integers, weights, versions (V), etc.
+        version_patterns = [
+            r'\d+', # Numbers
+            r'(HEAVY|LIGHT)', # Weight classes
+            r'V\d*' # Version indicators
+        ]
+
+        for pattern in version_patterns:
+            match = re.search(pattern, str(rocket_name).upper())
+            if match:
+                return match.group(0)
+        
+        return 'Base'
+    
+    def _is_reusable_rocket(self, rocket_name: str) -> bool:
+        """Determine if rocket is reusable based on name."""
+        if pd.isna(rocket_name):
+            return None
+        
+        reusable_rockets = ['FALCON 9', 'FALCON HEAVY', 'ELECTRON']
+        return any(rocket in str(rocket_name).upper() for rocket in reusable_rockets)
+
+    def _is_commercial_provider(self, provider: str) -> bool:
+        """Determine if it is a commercial launch provider."""
+        if pd.isna(provider):
+            return False
+        
+        commercial_providers = ['SPACEX', 'BLUE ORIGIN', 'ROCKET LAB', 'VIRGIN ORBIT', 'ULA']
+        return any(commercial in str(provider).upper() for commercial in commercial_providers)
+    
+    def _integrate_weather_features(self, df_launches: pd.DataFrame, df_weather: pd.DataFrame) -> pd.DataFrame:
+        """Integrate weather features with launch data."""
+        if 'launch_datetime' not in df_launches.columns:
+            return df_launches
+        
+        df_integrated = df_launches.copy()
+
+        # Initialize weather columns
+        for col in self.weather_features:
+            df_integrated[f'weather_{col}'] = np.nan
+        
+        # Match weather data to launches
+
+        if 'forecast_time' in df_weather.columns:
+            df_weather['weather_datetime'] = pd.to_datetime(df_weather['forecast_time'])
+        elif 'dt' in df_weather.columns:
+            df_weather['weather_datetime'] = pd.to_datetime(df_weather['dt'])
+        else:
+            return df_integrated
+        
+        for idx, launch_row in df_integrated.iterrows():
+            launch_time = launch_row['launch_datetime']
+            launch_site = launch_row.get('launch_site', 'Unknown')
+
+            # Find closest weather data in time and location
+            site_weather = df_weather[df_weather.get('site_code', 'Unknown') == launch_site]
+            if len(site_weather) == 0:
+                site_weather = df_weather
+            
+            if len(site_weather) > 0:
+                # Find closest time match
+                site_weather['time_diff'] = abs(site_weather['weather_datetime'] - launch_time)
+                closest_weather = site_weather.loc[site_weather['time_diff'].idxmin()]
+
+                # Copy weather features
+                for col in self.weather_features:
+                    if col in closest_weather:
+                        df_integrated.loc[idx, f'weather_{col}'] = closest_weather[col]
+
+        # Engineer additional weather features
+        if 'weather_wind_speed_ms' in df_integrated.columns:
+            df_integrated['weather_wind_category'] = pd.cut(
+                df_integrated['weather_wind_speed_ms'],
+                bins = [0, 5, 10, 15, float('inf')],
+                labels=['Calm', 'Light', 'Moderate', 'Strong'],
+                include_lowest=True
+            )
+
+        return df_integrated
+    
+    def _integrate_orbital_features(self, df_launches: pd.DataFrame, df_orbital: pd.DataFrame) -> pd.DataFrame:
+        df_integrated = df_launches.copy()
