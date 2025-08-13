@@ -29,20 +29,58 @@ class DataPreprocessor:
         self.quality_reports = {}
 
         # Standard feature engineering configurations
+
+        self.launch_features = [
+            # Rocket characteristics
+            'rocket_name', 'rocket_family', 'rocket_type', 'flight_number',
+
+            # Launch provider
+            'launch_provider', 'launch_service_provider', 'agency_type',
+
+            # Launch location
+            'pad_name', 'pad_location', 'launchpad_name', 'launchpad_locality',
+            'launchpad_region', 'country_code',
+            'pad_latitude', 'pad_longitude',
+
+            # Mission characteristics
+            'mission_type', 'mission_name',
+            'payload_mass_kg', 'payload_count', 'payload_types',
+            'orbit',
+
+            # Temporal features (to be engineered)
+            'launch_year', 'launch_month', 'launch_hour', 
+            'launch_day_of_week', 'launch_season'
+
+            # Weather-related indicators from launch data
+            'weather_keywords', 'has_weather_delay', 'weather_metnioned',
+            'hold_reason', 'fail_reason',
+
+            # Target variable
+            'success'
+        ]
+
         self.weather_features = [
             'temperature_c', 'pressure_hpa', 'humidity_percent',
             'wind_speed_ms', 'wind_direction_deg', 'wind_gust_ms',
-            'cloud_cover_percent', 'visibility_m', 'precipitation_probability_percent'
-        ]
-
-        self.launch_features = [
-            'rocket_name', 'rocket_family', 'launch_provider', 'pad_name',
-            'mission_type', 'payload_mass_kg', 'success'
+            'cloud_cover_percent', 'visibility_m', 'rain_1h_mm',
+            'rain_3h_mm', 'snow_1h_mm', 'precipitation_probability_percent',
+            'weather_main', 'weather_description'
         ]
 
         self.orbital_features = [
-            'inclination_deg', 'eccentricity', 'mean_motion', 'orbital_period_minutes',
-            'approximate_altitude_km'
+            'orbital_object_count', 'leo_objects_count', 'meo_objects_count',
+            'geo_objects_count', 'orbital_congestion_score'
+        ]
+
+        self.engineered_features = [
+            'provider_experience', # Cumulative launches by provider
+            'is_commerical', # Government vs commercial
+            'is_reusable', # Reusable rocket technology
+            'mission_complexity', # Derived from mission type
+            'payload_cateogory', # Light/Medium/Heavy/Super Heavy
+            'weather_wind_category', # Calm/Light/Moderate/Strong
+            'days_since_last_launch', # Launch cadence
+            'previous_success_rate' # Historical success rate for provider
         ]
 
     def load_all_data(self) -> Dict[str, pd.DataFrame]:
@@ -496,62 +534,116 @@ class DataPreprocessor:
             return None, None
         
         # Start with launch data as the base
-        launch_data = None
+        launch_data = []
         for key, df in self.processed_data.items():
-            if 'launch' in key.lower():
-                if launch_data is None:
-                    launch_data = df.copy()
-                else:
-                    # Combine multiple launch datasets
-                    launch_data = pd.concat([launch_data, df], ignore_index=True, sort=False)
+            if 'launch' in key.lower() or 'spacex' in key.lower():
+                df_copy = df.copy()
+                # Ensure there is a source column
+                df_copy['data_source'] = key
+                launch_data.append(df_copy)
 
-        if launch_data is None:
+        if not launch_data:
             print("No launch data found.")
             return None, None
         
-        # Clean launch data
-        launch_data = self.clean_launch_data(launch_data)
+        # Combine all launch data
+        combined_launches = pd.concat(launch_data, ignore_index=True, sort=False)
 
-        # Get weather and orbital data
-        weather_data = self.processed_data.get('weather_current')
-        if weather_data is not None:
-            weather_data = self.processed_data.get('weather_forecast')
+        # Clean the launch data
+        combined_launches = self.clean_launch_data(combined_launches)
+
+        # Filter with only valid success markers
+        combined_launches = combined_launches[combined_launches['success'].notna()]
+        combined_launches = combined_launches[combined_launches['success'].isin([True, False, 0, 1])]
+    
+        weather_data = self.processed_data.get('weather_forecast')
+        if weather_data is None:
+            weather_data = self.processed_data.get('weather_current')
         orbital_data = self.processed_data.get('orbital_data')
 
+        # Clean supplementary data
         if weather_data is not None:
             weather_data = self.clean_weather_data(weather_data)
         if orbital_data is not None:
             orbital_data = self.clean_orbital_data(orbital_data)
 
         # Engineer features
-        df_features = self.engineer_features(launch_data, weather_data, orbital_data)
+        df_features = self.engineer_features(combined_launches, weather_data, orbital_data)
 
-        if not target_column in df_features.columns:
+        # Ensure target column exists and is clean
+        if target_column not in df_features.columns:
             print(f"Target column {target_column} not found in data.")
             return None, None
         
-        # Remove rows without target column
-        df_features = df_features.dropna(subset=[target_column])
+        # Separate features and target
+        y = df_features[target_column].copy()
+        
+        # Clean target variable
+        y = y.map({True: 1, False: 0, 1:1, 0:0})
 
-        # Prepare features and target
-        X = df_features.drop(columns=[target_column])
-        y = df_features[target_column]
+        # Remove any remaining NaN values
+        valid_indices = y.notna()
+        y = y[valid_indices]
+        df_features = df_features[valid_indices]
 
-        # Select only numeric and categorical features for ML
+        # Select feature columns (Exclude target and metadata)
+        exclude_columns = [
+            target_column, 'data_source', 'collection_date',
+            'launch_library_id', 'launch_library_url', 'video_url',
+            'wikipedia', 'webcast', 'details', 'mission_description',
+            'info_urls', 'video_urls', 'image_urls', 'programs', 'last_updated'
+        ]
+
+        feature_columns = [col for col in df_features.columns if col not in exclude_columns]
+
+        X = df_features[feature_columns]
+
+        # Handle categorical variables
         categorical_cols = X.select_dtypes(include=['object', 'category']).columns
         numeric_cols = X.select_dtypes(include=[np.number]).columns
 
-        # One-hot encode categorical vals
-        X_encoded = pd.get_dummies(X[categorical_cols], prefix_sep='_')
-        X_final = pd.concat([X[numeric_cols], X_encoded], axis=1)
+        # One-hot encode categorical variables
+        if len(categorical_cols) > 0:
+            # Convert categorical columns to string type first to avoid the category issue
+            for col in categorical_cols:
+                # Convert to string type to allow modification
+                X[col] = X[col].astype(str)
+                
+                # Handle missing values
+                X[col] = X[col].fillna('Unknown')
+                
+                # Get top categories
+                value_counts = X[col].value_counts()
+                if len(value_counts) > 10:
+                    top_categories = value_counts.head(10).index.tolist()
+                    # Use numpy where for safer assignment
+                    X[col] = np.where(X[col].isin(top_categories), X[col], 'Other')
 
-        # Handle remaining missing values
-        X_final = X_final.fillna(X_final.mean())
+            # Now do one-hot encoding
+            X_encoded = pd.get_dummies(X[categorical_cols], prefix_sep='_', drop_first=True)
+            X_final = pd.concat([X[numeric_cols], X_encoded], axis=1)
+        else:
+            X_final = X[numeric_cols].copy()
 
-        print(f"Training set with {len(X_final)} samples and {len(X_final.columns)} features.")
+        # Fill missing values for numeric columns
+        for col in X_final.columns:
+            if X_final[col].dtype in [np.float64, np.int64, float, int]:
+                median_val = X_final[col].median()
+                if pd.notna(median_val):
+                    X_final[col] = X_final[col].fillna(median_val)
+                else:
+                    X_final[col] = X_final[col].fillna(0)
+            else:
+                X_final[col] = X_final[col].fillna(0)
+
+        # Remove any columns that are all NaN or have zero variance
+        X_final = X_final.loc[:, X_final.notna().any()]
+        X_final = X_final.loc[:, X_final.std() > 0]
+
+        self.feature_columns = X_final.columns.tolist()
 
         return X_final, y
-    
+
     def generate_data_report(self) -> Dict:
         """Generate a comprehensive data quality and preprocessing report."""
         if not self.processed_data:
@@ -617,14 +709,37 @@ class DataPreprocessor:
 
         return report
     
+    def remove_url_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove URL and unnecessary metadata columns from dataframe."""
+        url_patterns = ['url', 'link', 'webcast', 'wikipedia']
+        columns_to_remove = []
+
+        for col in df.columns:
+            # Check if column is in the patterns
+            if any(pattern in col.lower() for pattern in url_patterns):
+                columns_to_remove.append(col)
+        
+        # Also remove other non-feature columns
+        other_exclude = ['collection_date', 'last_updated', 'collected_at',
+                         'mission_description', 'details', 'programs']
+        
+        for col in other_exclude:
+            if col in df.columns:
+                columns_to_remove.append(col)
+
+        return df.drop(columns=columns_to_remove, errors='ignore')
+
     def save_processed_data(self, output_dir: str="data/processed"):
         """Save all processed datasets."""
         os.makedirs(output_dir, exist_ok=True)
 
         for name, df in self.processed_data.items():
+            # Clean df beforehand
+            df_clean = self.remove_url_columns(df)
+
             filename = f"{name}_processed.csv"
             filepath = os.path.join(output_dir, filename)
-            df.to_csv(filepath, index=False)
+            df_clean.to_csv(filepath, index=False)
             print(f"Saved {filename}.")
         try:
             metadata = {
