@@ -413,7 +413,6 @@ class DataPreprocessor:
             df_integrated[f'weather_{col}'] = np.nan
         
         # Match weather data to launches
-
         if 'forecast_time' in df_weather.columns:
             df_weather['weather_datetime'] = pd.to_datetime(df_weather['forecast_time'])
         elif 'dt' in df_weather.columns:
@@ -421,8 +420,16 @@ class DataPreprocessor:
         else:
             return df_integrated
         
+        df_integrated['launch_datetime'] = pd.to_datetime(df_integrated['launch_datetime'], utc=True)
+        df_weather['weather_datetime'] = pd.to_datetime(df_weather['weather_datetime'], utc=True)    
+
         for idx, launch_row in df_integrated.iterrows():
             launch_time = launch_row['launch_datetime']
+
+            # Skip if launch_time is not a time
+            if pd.isna(launch_time):
+                continue
+
             launch_site = launch_row.get('launch_site', 'Unknown')
 
             # Find closest weather data in time and location
@@ -432,13 +439,20 @@ class DataPreprocessor:
             
             if len(site_weather) > 0:
                 # Find closest time match
+                site_weather = site_weather.copy()
                 site_weather['time_diff'] = abs(site_weather['weather_datetime'] - launch_time)
-                closest_weather = site_weather.loc[site_weather['time_diff'].idxmin()]
 
-                # Copy weather features
-                for col in self.weather_features:
-                    if col in closest_weather:
-                        df_integrated.loc[idx, f'weather_{col}'] = closest_weather[col]
+                if not site_weather['time_diff'].empty and not site_weather['time_diff'].isna().all():
+                    try:
+                        closest_idx = site_weather['time_diff'].idxmin()
+                        closest_weather = site_weather.loc[closest_idx]
+
+                        # Copy weather features
+                        for col in self.weather_features:
+                            if col in closest_weather:
+                                df_integrated.loc[idx, f'weather_{col}'] = closest_weather[col]
+                    except (ValueError, KeyError):
+                        continue # Skip this launch of no matching weather.
 
         # Engineer additional weather features
         if 'weather_wind_speed_ms' in df_integrated.columns:
@@ -464,7 +478,7 @@ class DataPreprocessor:
         if 'approximate_altitude_km' in df_orbital.columns:
             leo_objects = len(df_orbital[df_orbital['approximate_altitude_km'] < 2000])
             meo_objects = len(df_orbital[df_orbital['approximate_altitude_km'] >= 2000 & 
-                              df_orbital['approximate_altitude_km'] < 35786])
+                              (df_orbital['approximate_altitude_km'] < 35786)])
             geo_objects = len(df_orbital[df_orbital['approximate_altitude_km'] >= 35786])
 
             df_integrated['leo_objects_count'] = leo_objects
@@ -486,7 +500,7 @@ class DataPreprocessor:
         for key, df in self.processed_data.items():
             if 'launch' in key.lower():
                 if launch_data is None:
-                    launch_data = df.copy
+                    launch_data = df.copy()
                 else:
                     # Combine multiple launch datasets
                     launch_data = pd.concat([launch_data, df], ignore_index=True, sort=False)
@@ -499,7 +513,9 @@ class DataPreprocessor:
         launch_data = self.clean_launch_data(launch_data)
 
         # Get weather and orbital data
-        weather_data = self.processed_data.get('weather_current') or self.processed_data.get('weather_forecast')
+        weather_data = self.processed_data.get('weather_current')
+        if weather_data is not None:
+            weather_data = self.processed_data.get('weather_forecast')
         orbital_data = self.processed_data.get('orbital_data')
 
         if weather_data is not None:
@@ -509,6 +525,13 @@ class DataPreprocessor:
 
         # Engineer features
         df_features = self.engineer_features(launch_data, weather_data, orbital_data)
+
+        if not target_column in df_features.columns:
+            print(f"Target column {target_column} not found in data.")
+            return None, None
+        
+        # Remove rows without target column
+        df_features = df_features.dropna(subset=[target_column])
 
         # Prepare features and target
         X = df_features.drop(columns=[target_column])
@@ -603,24 +626,26 @@ class DataPreprocessor:
             filepath = os.path.join(output_dir, filename)
             df.to_csv(filepath, index=False)
             print(f"Saved {filename}.")
-        
-        metadata = {
-            'feature_mappings': self.feature_mappings,
-            'quality_reports': {name: {
-                'total_records': report.total_records,
-                'missing_values': report.missing_values,
-                'duplicate_records': report.duplicate_records,
-                'completeness_score': report.completeness_score,
-                'consistency_score': report.consistency_score,
-                'overall_quality': report.overall_quality
-            } for name, report in self.quality_reports.items()}
-        }
+        try:
+            metadata = {
+                'feature_mappings': self.feature_mappings,
+                'quality_reports': {name: {
+                    'total_records': int(report.total_records),
+                    'missing_values': {k: int(v) for k, v in report.missing_values.items()},
+                    'duplicate_records': int(report.duplicate_records),
+                    'completeness_score': report.completeness_score,
+                    'consistency_score': report.consistency_score,
+                    'overall_quality': report.overall_quality
+                } for name, report in self.quality_reports.items()}
+            }
 
-        metadata_path = os.path.join(output_dir, 'preprocessing_metadata.json')
-        with open(metadata_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
+            metadata_path = os.path.join(output_dir, 'preprocessing_metadata.json')
+            with open(metadata_path, 'w') as f:
+                json.dump(metadata, f, indent=2)
 
-        print(f"Preprocessing metadata saved to {metadata_path}.")
+            print(f"Preprocessing metadata saved to {metadata_path}.")
+        except Exception as e:
+            print(f"Could not save metadata: {e}.")
 
     def load_processed_data(self, input_dir: str="data/processed") -> Dict[str, pd.DataFrame]:
         """Load previously processed datasets."""
