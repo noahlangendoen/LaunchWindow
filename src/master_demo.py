@@ -12,7 +12,9 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Add src to path
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+sys.path.insert(0, project_root)
 
 from src.data_ingestion.collect_weather import WeatherCollector
 from src.data_ingestion.collect_spacex import spaceXLaunchCollector
@@ -58,6 +60,24 @@ class LaunchPredictionDemo:
 
         print("System Initialized Successfully.")
 
+    def remove_site(self, site_code, reason):
+        """Remove launch site from consideration"""
+        if site_code in self.launch_sites:
+            site_name = self.launch_sites[site_code]
+            print(f"REMOVING SITE: {site_name} - {reason}")
+            del self.launch_sites[site_code]
+
+        # Check if any sites are left
+        if not self.launch_sites:
+            print("CRITICAL ERROR: No launch sites remain.")
+            print("HALTING PROGRAM - cannot continue without sites.")
+            sys.exit(1)
+
+    def check_minimum_sites(self, required_count=1):
+        """Check if we have minimum required sites"""
+        if len(self.launch_sites) < required_count:
+            print(f"INSUFFICIENT SITES - Halting Program")
+            sys.exit(1)
     
     def objective_1_launch_success_prediction(self):
         """Objective 1: Launch Success Prediction with ML Models."""
@@ -72,10 +92,8 @@ class LaunchPredictionDemo:
             spacex_launches = self.spacex_collector.get_all_launches()
             if not spacex_launches:
                 print("No SpaceX Data Available -- Killing Run.")
-                # IMPLEMENT HALT HERE
-                #
-                #
-                #
+                sys.exit(1)
+
             print(f"Collected {len(spacex_launches)} Historical SpaceX Launches.")
 
             """
@@ -89,12 +107,11 @@ class LaunchPredictionDemo:
                     if weather:
                         current_weather[site_code] = weather
                         print(f"Successfully Collected Weather At: {self.launch_sites[site_code]}.")
+                    else:
+                        self.remove_site(site_code, "No weather for site.")
                 except:
                     print(f"Failed To Collect Weather At: {self.launch_sites[site_code]}. Removing As Possible Launch Site.")
-                    # IMPLEMENT REMOVAL OF LAUNCH SITE HERE
-                    #
-                    #
-                    #
+                    self.remove_site(site_code, "No weather for site.")
             
             """
             TRAIN THE MODEL
@@ -194,14 +211,13 @@ class LaunchPredictionDemo:
                         weather_data = self.weather_collector.get_current_weather(site_code)
                         if not weather_data:
                             print(f"No Weather Data Available For {site_name}.")
-                            # IMPLEMENT SITE REMOVAL
-                            # 
-                            #
-                            #
+                            self.remove_site(site_code, "No weather for site.")
+
                         else:
                             print(f"Collection Successful For: {site_name}.")
                     except:
                         print("Removing Site.")
+                        self.remove_site(site_code, "No weather for site.")
                     
                     # Adjust target inclination based on launch site
                     site_target_orbit = target_orbit.copy()
@@ -318,18 +334,14 @@ class LaunchPredictionDemo:
                     forecast_data = self.weather_collector.get_forecast(site_code, days=5)
                     if not forecast_data:
                         print(f"No Forecast Collected For: {site_name} - Removing Site")
-                        # Implement Site Removal Here
-                        #
-                        #
-                        #
+                        self.remove_site(site_code, "No forecast for site.")
+
                     site_forecasts[site_code] = forecast_data
                     print(f"{site_name}: {len(forecast_data)} Forecast Data Points")
                 except:
                     print(f"No Forecast Collected For: {site_name} - Removing Site")
-                    # Implement Site Removal Here
-                    #
-                    #
-                    #
+                    self.remove_site(site_code, "No forecast for site.")
+
             
             """
             DEFINE OPTIMIZATION PARAMETERS
@@ -479,10 +491,7 @@ class LaunchPredictionDemo:
                 try:
                     weather = self.weather_collector.get_current_weather(site_code)
                     if not weather:
-                        # Remove the site here
-                        #
-                        #
-                        #
+                        self.remove_site(site_code, "No weather for site.")
                         print(f"Removing: {site_code}")
 
                     current_conditions[site_code] = weather
@@ -504,6 +513,8 @@ class LaunchPredictionDemo:
                 
                 except Exception as e:
                     print(f"Live Monitoring For {self.launch_sites[site_code]} Unavailable")
+                    self.remove_site(site_code, "Can't monitor site.")
+
             
             """
             HISTORICAL ANALYSIS
