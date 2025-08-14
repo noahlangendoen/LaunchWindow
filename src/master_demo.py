@@ -532,3 +532,80 @@ class LaunchPredictionDemo:
 
                     if 'date_utc' in df.columns:
                         df['date_utc'] = pd.to_datetime(df['date_utc'])
+                        recent_launches = df[df['date_utc'] > datetime.now() - timedelta(days=365)]
+
+                        if len(recent_launches) > 0:
+                            recent_success_rate = recent_launches['success'].mean() if 'success' in recent_launches.columns else 0
+                            print(f"\nRecent Performance (Last 12 Months):")
+                            print(f"    Total Launches: {len(recent_launches)}")
+                            print(f"    Success Rate: {recent_success_rate:.1%}")
+
+            except Exception as e:
+                print("Historical Analysis Unavailable.")
+            
+            """
+            ALERT SYSTEM
+            """
+            print("\nStep 3: Alert System")
+            alerts = []
+
+            # Weather alerts
+            for site_code, weather in current_conditions.items():
+                site_name = self.launch_sites[site_code]
+
+                if weather.get('wind_speed_ms', 0) > 15:
+                    alerts.append(f"HIGH WIND at {site_name}: {weather['wind_speed_ms']:.1f} m/s")
+                
+                if weather.get('temperature_c', 20) < -5 or weather.get('temperature_c', 20) > 35:
+                    alerts.append(f"EXTREME TEMPERATURE at {site_name}: {weather.get['temperature_c']:.1f}°C")
+
+                if weather.get('visibility_m', 10000) < 5000:
+                    alerts.append(f"LOW VISIBILITY at {site_name}: {weather['visibility_m'] / 1000:.1f} km")
+            
+            if alerts:
+                for alert in alerts:
+                    print(f"    {alert}")
+            else:
+                print("No Active Alerts")
+            
+            """
+            SYSTEM STATUS
+            """
+            print(f"\nSystem Status (as of {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):")
+            print(f"    ML Model: {'Trained' if self.predictor.is_trained else 'Model Requires Training'}")
+            print(f"    Weather Data: {'Live' if len(current_conditions) > 0 else 'Unavailable'}")
+            print(f"    Physics Engine: Ready")
+            print(f"    Historical Data: Available")
+
+        except Exception as e:
+            print(f"Error In Objective 4: {e}")
+    
+    def run_complete_demo(self):
+        """Run the complete demonstration of all objectives"""
+
+        start_time = datetime.now()
+
+        # Run all objectives
+        self.objective_1_launch_success_prediction()
+        self.objective_2_trajectory_optimization()
+        self.objective_3_launch_window_optimization()
+        self.objective_4_monitoring_dashboard()
+
+        # Summary
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+
+        print("DEMONSTRATION COMPLETE")
+
+def main():
+    """Main function to run the demonstration"""
+    try:
+        demo = LaunchPredictionDemo()
+        demo.run_complete_demo()
+    except KeyboardInterrupt:
+        print(f"\n\nDemo Interrupted By User")
+    except Exception as e:
+        print(f"\n\nDemo Failed: {e}")
+
+if __name__ == "__main__":
+    main()
