@@ -4,17 +4,17 @@ Demo script that shows the 4 core objectives without databases or web applicatio
 
 import sys
 import os
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+sys.path.insert(0, project_root)
+
 import pandas as pd
 import numpy
 from datetime import datetime, timedelta
 import json
 import warnings
 warnings.filterwarnings('ignore')
-
-# Add src to path
-script_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(script_dir)
-sys.path.insert(0, project_root)
 
 from src.data_ingestion.collect_weather import WeatherCollector
 from src.data_ingestion.collect_spacex import spaceXLaunchCollector

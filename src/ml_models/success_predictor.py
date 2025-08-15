@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Dict, Tuple, List, Optional
 import matplotlib.pyplot as plt
 import seaborn as sns
-from data_preprocessor import DataPreprocessor
+from .data_preprocessor import DataPreprocessor
 
 
 class LaunchSuccessPredictor:

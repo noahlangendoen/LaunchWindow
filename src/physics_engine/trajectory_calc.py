@@ -234,7 +234,7 @@ class TrajectoryCalculator:
         else:
             success_factors.append(0.3)
 
-        if max_g_force < vehicle_specs.max_acceleartion_g:
+        if max_g_force < vehicle_specs.max_acceleration_g:
             success_factors.append(0.95)
         else:
             success_factors.append(0.4)
@@ -466,7 +466,7 @@ class TrajectoryCalculator:
                 drag_coefficient=vehicle_specs.drag_coefficient,
                 cross_sectional_area_m2=vehicle_specs.cross_sectional_area_m2,
                 max_dynamic_pressure_pa=vehicle_specs.max_dynamic_pressure_pa,
-                max_acceleartion_g=vehicle_specs.max_acceleartion_g,
+                max_acceleration_g=vehicle_specs.max_acceleration_g,
                 stage_count=vehicle_specs.stage_count
             )
 
@@ -498,7 +498,7 @@ class TrajectoryCalculator:
                 drag_coefficient = vehicle_specs.drag_coefficient,
                 cross_sectional_area_m2 = vehicle_specs.cross_sectional_area_m2,
                 max_dynamic_pressure_pa = vehicle_specs.max_dynamic_pressure_pa,
-                max_acceleartion_g = vehicle_specs.max_acceleartion_g,
+                max_acceleration_g = vehicle_specs.max_acceleration_g,
                 stage_count = vehicle_specs.stage_count
             )
 
@@ -575,7 +575,7 @@ class TrajectoryCalculator:
         risk_factors = []
         if trajectory.max_dynamic_pressure > vehicle_specs.max_dynamic_pressure_pa * 0.9:
             risk_factors.append('High dynamic pressure approaching limits.')
-        if trajectory.max_g_force > vehicle_specs.max_acceleartion_g * 0.9:
+        if trajectory.max_g_force > vehicle_specs.max_acceleration_g * 0.9:
             risk_factors.append('High G-force approaching limits.')
         if trajectory.fuel_remaining_kg < vehicle_specs.fuel_mass_kg * 0.05:
             risk_factors.append('Low fuel remaining.')
