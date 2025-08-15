@@ -44,10 +44,17 @@ class LaunchSuccessPredictor:
         # Fill categorical missing values with mode or 'unkown'
         for col in categorical_columns:
             if col in features.columns:
+                features[col] = features[col].astype(str).fillna('Unknown')
+
                 if col not in self.label_encoders:
                     self.label_encoders[col] = LabelEncoder()
                     unique_values = list(features[col].unique()) + ['Unknown']
                     self.label_encoders[col].fit(unique_values)
+                else:
+                    known_labels = set(self.label_encoders[col].classes_)
+                    features[col] = features[col].apply(
+                        lambda x: x if x in known_labels else 'Unknown'
+                    )
                 
                 features[col] = self.label_encoders[col].transform(features[col])
         
