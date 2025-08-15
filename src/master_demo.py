@@ -120,6 +120,16 @@ class LaunchPredictionDemo:
 
             # Convert to df and start preprocessing
             launches_df = pd.DataFrame(spacex_launches)
+
+            for col in launches_df.columns:
+                if launches_df[col].dtype == 'object':
+                    # Check if column contains lists or dicts (getting list object not hashable error)
+                    try:
+                        if isinstance(launches_df[col].iloc[0], (list, dict)):
+                            launches_df[col] = launches_df[col].apply(str)
+                    except (IndexError, TypeError):
+                        pass
+
             self.preprocessor.processed_data = {'spacex_launches': launches_df}
 
             # Create training dataset
