@@ -46,7 +46,7 @@ class WeatherCollector:
                 'dt': datetime.fromtimestamp(data['dt']).isoformat(),
 
                 # Temperature Data
-                'temmperature_c': data['main']['temp'],
+                'temperature_c': data['main']['temp'],
                 'feels_like_c': data['main']['feels_like'],
                 'temp_min_c': data['main']['temp_min'],
                 'temp_max_c': data['main']['temp_max'],
