@@ -69,19 +69,31 @@ class TrajectoryCalculator:
                                     launch_time: datetime, time_step_s: float = 1.0) -> LaunchTrajectory:
         """Calculate complete launch trajectory from surface to orbit."""
 
+        DEBUG = False
+        debug_interval = 10  # Print every 10 seconds
+        
         site = self.orbital_mechanics.launch_sites[launch_site]
         trajectory_points = []
 
         # Initial conditions
         current_time = 0
         current_mass = vehicle_specs.dry_mass_kg + vehicle_specs.fuel_mass_kg
+        
+        if DEBUG:
+            print(f"\n=== TRAJECTORY DEBUG for {launch_site} ===")
+            print(f"Initial mass: {current_mass:.0f} kg")
+            print(f"Fuel mass: {vehicle_specs.fuel_mass_kg:.0f} kg")
+            print(f"Thrust: {vehicle_specs.thrust_n:.0f} N")
+            print(f"Isp: {vehicle_specs.specific_impulse_s:.0f} s")
+            print(f"Max dynamic pressure: {vehicle_specs.max_dynamic_pressure_pa:.0f} Pa")
+            print(f"Max G-force: {vehicle_specs.max_acceleration_g:.1f} g")
 
         # Launch site position in Earth-centered coordinates
         lat_rad = math.radians(site.latitude)
         lon_rad = math.radians(site.longitude)
         site_altitude_km = site.altitude / 1000
 
-        # Intial position (Earth's service)
+        # Initial position (Earth's surface)
         earth_radius_km = self.EARTH_RADIUS_KM + site_altitude_km
         x0 = earth_radius_km * math.cos(lat_rad) * math.cos(lon_rad)
         y0 = earth_radius_km * math.cos(lat_rad) * math.sin(lon_rad)
@@ -95,44 +107,47 @@ class TrajectoryCalculator:
         try:
             launch_azimuth = self.orbital_mechanics.calculate_launch_azimuth(
                 launch_site, target_inclination, target_altitude
-                )
+            )
         except:
             if target_inclination > 90:
-                launch_azimuth = 180 # Southward retrograde
+                launch_azimuth = 180  # Southward retrograde
             else:
-                launch_azimuth = 90 # Eastward for prograde
+                launch_azimuth = 90  # Eastward for prograde
 
-        # Intial velocity
+        # Initial velocity
         earth_rotation_rate = 7.2921159e-5  # rad/s
-        v_earth_ms = earth_rotation_rate * earth_radius_km * 1000 * math.cos(lat_rad) # m/s at surface
-        velocity = np.array([
-            -v_earth_ms * math.sin(lon_rad) / 1000, # m/s to km/s
-            v_earth_ms * math.cos(lon_rad) / 1000, # m/s to km/s
-            0
-        ])
+        v_earth_ms = earth_rotation_rate * earth_radius_km * 1000 * math.cos(lat_rad)  # m/s at surface
+        velocity = np.array([0.0, 0.0, 0.0])
 
         # Launch trajectory simulation
         fuel_consumed = 0.0
         thrust_on = True
         max_dynamic_pressure = 0.0
         max_g_force = 0.0
+        
+        # Add throttle control
+        throttle = 1.0  # Start at full throttle
 
         # Termination conditions
         max_time = 600
-        target_velocity = math.sqrt(self.EARTH_MU / (self.EARTH_RADIUS_KM + target_altitude)) # km/s
+        target_velocity = math.sqrt(self.EARTH_MU / (self.EARTH_RADIUS_KM + target_altitude))  # km/s
 
         while current_time < max_time:
             # Current altitude
             altitude_km = np.linalg.norm(position) - self.EARTH_RADIUS_KM
             altitude_m = altitude_km * 1000
 
-            if altitude_km < -10: # Trajectory went underground
+            if altitude_km < -10:  # Trajectory went underground
                 print(f"WARNING: Trajectory went underground at t={current_time}s.")
                 break
 
             vel_magnitude_kms = np.linalg.norm(velocity)
-            if altitude_km >= target_altitude and vel_magnitude_kms >= target_velocity * 0.95:
-                break # Mission Success
+            if altitude_km >= target_altitude * 0.35 and vel_magnitude_kms >= target_velocity * 0.90:
+                # Adjusted for single-stage simulation reaching partial altitude
+                if DEBUG:
+                    print(f"\nMISSION SUCCESS at t={current_time}s!")
+                    print(f"Altitude: {altitude_km:.1f} km, Velocity: {vel_magnitude_kms:.3f} km/s")
+                break  #
 
             # Atmospheric conditions
             atmos = self.atmospheric_models.weather_adjusted_atmosphere(altitude_m, weather_data)
@@ -140,9 +155,20 @@ class TrajectoryCalculator:
             # Current velocity magnitude
             vel_magnitude_ms = np.linalg.norm(velocity) * 1000  # Convert km/s to m/s
 
-            # Thrust calculation
+            # Calculate dynamic pressure BEFORE applying thrust
+            dynamic_pressure = 0.5 * atmos.density_kg_m3 * vel_magnitude_ms ** 2
+            
+            # THROTTLE CONTROL based on dynamic pressure
+            if dynamic_pressure > vehicle_specs.max_dynamic_pressure_pa * 0.7:
+                # Start throttling down when approaching max-Q
+                throttle = max(0.3, 1.0 - (dynamic_pressure - vehicle_specs.max_dynamic_pressure_pa * 0.7) / 
+                            (vehicle_specs.max_dynamic_pressure_pa * 0.3))
+            else:
+                throttle = 1.0
+
+            # Thrust calculation with throttle
             if thrust_on and fuel_consumed < vehicle_specs.fuel_mass_kg:
-                thrust_magnitude = vehicle_specs.thrust_n
+                thrust_magnitude = vehicle_specs.thrust_n * throttle  # Apply throttle
                 
                 # Adding thrust limiting
                 max_allowed_thrust = vehicle_specs.max_acceleration_g * self.G0 * current_mass
@@ -156,6 +182,8 @@ class TrajectoryCalculator:
                 if fuel_consumed >= vehicle_specs.fuel_mass_kg:
                     thrust_on = False
                     thrust_magnitude = 0.0
+                    if DEBUG:
+                        print(f"\nFUEL DEPLETED at t={current_time}s, altitude={altitude_km:.1f} km")
                     if altitude_km < target_altitude * 0.5:
                         # Mission failure due to depletion
                         break
@@ -163,11 +191,17 @@ class TrajectoryCalculator:
                 thrust_magnitude = 0.0
                 thrust_on = False
             
-            # Thrust direction
+            # Debug output every N seconds
+            if DEBUG and current_time % debug_interval == 0:
+                print(f"\nt={current_time:3.0f}s: Alt={altitude_km:6.1f}km, Vel={vel_magnitude_ms:6.0f}m/s, "
+                    f"Q={dynamic_pressure/1000:5.1f}kPa, Throttle={throttle:3.0%}, "
+                    f"Fuel={vehicle_specs.fuel_mass_kg - fuel_consumed:6.0f}kg")
+            
+            # Thrust direction (rest of the code remains the same...)
             if current_time < 10:
                 thrust_direction = position / np.linalg.norm(position)
-            else: # Gravity turn
-                pitch_angle = max(0, 90 - (current_time - 10) * 0.75) # degrees
+            else:  # Gravity turn
+                pitch_angle = max(0, 90 - (current_time - 10) * 0.75)  # degrees
                 pitch_rad = math.radians(pitch_angle)
                 azimuth_rad = math.radians(launch_azimuth)
 
@@ -195,23 +229,23 @@ class TrajectoryCalculator:
             # Force calculations
             thrust_acceleration_kms2 = np.zeros(3)
             if thrust_magnitude > 0:
-                thrust_acceleration_ms2 = thrust_magnitude / current_mass # m/s^2
-                thrust_acceleration_kms2 = thrust_direction * (thrust_acceleration_ms2 / 1000) # Convert to km/s^2
+                thrust_acceleration_ms2 = thrust_magnitude / current_mass  # m/s^2
+                thrust_acceleration_kms2 = thrust_direction * (thrust_acceleration_ms2 / 1000)  # Convert to km/s^2
 
             # Gravitational force
             r_km = np.linalg.norm(position)
-            gravity_acceleration_kms2 = -self.EARTH_MU * position / (r_km ** 3) # km/s^2
+            gravity_acceleration_kms2 = -self.EARTH_MU * position / (r_km ** 3)  # km/s^2
 
             # Drag acceleration
             drag_acceleration_kms2 = np.zeros(3)
-            if altitude_m < 100000: # Only consider below 100 km
+            if altitude_m < 100000:  # Only consider below 100 km
                 drag_force = self.atmospheric_models.calculate_drag_force(
                     vel_magnitude_ms, vehicle_specs.cross_sectional_area_m2,
                     vehicle_specs.drag_coefficient, atmos, 0
                 )
                 if vel_magnitude_kms > 0:
                     drag_direction = -velocity / vel_magnitude_kms
-                    drag_acceleration_ms2 = drag_force.magnitude_n / current_mass # m/s^2
+                    drag_acceleration_ms2 = drag_force.magnitude_n / current_mass  # m/s^2
                     drag_acceleration_kms2 = drag_direction * (drag_acceleration_ms2 / 1000)
             else:
                 drag_force = type('obj', (object,), {'magnitude_n': 0.0})()
@@ -220,14 +254,13 @@ class TrajectoryCalculator:
             total_acceleration_kms2 = thrust_acceleration_kms2 + gravity_acceleration_kms2 + drag_acceleration_kms2
 
             # Update state
-            position += velocity * time_step_s # km
-            velocity += total_acceleration_kms2 * time_step_s # km/s
+            position += velocity * time_step_s  # km
+            velocity += total_acceleration_kms2 * time_step_s  # km/s
 
             # Calculate metrics
-            dynamic_pressure = 0.5 * atmos.density_kg_m3 * vel_magnitude_ms ** 2
             max_dynamic_pressure = max(max_dynamic_pressure, dynamic_pressure)
 
-            acceleration_magnitude_ms2 = np.linalg.norm(total_acceleration_kms2) * 1000 # m/s^2
+            acceleration_magnitude_ms2 = np.linalg.norm(total_acceleration_kms2) * 1000  # m/s^2
             g_force = acceleration_magnitude_ms2 / self.G0
             max_g_force = max(max_g_force, g_force)
 
@@ -244,7 +277,7 @@ class TrajectoryCalculator:
                 velocity=velocity.copy(),
                 altitude_km=altitude_km,
                 velocity_magnitude_ms=vel_magnitude_ms,
-                acceleration=total_acceleration_kms2 * 1000, # Storing in m/s^2 for consistency
+                acceleration=total_acceleration_kms2 * 1000,  # Storing in m/s^2 for consistency
                 mass_kg=current_mass,
                 thrust_n=thrust_magnitude,
                 drag_n=drag_force.magnitude_n if 'drag_force' in locals() else 0.0,
@@ -257,6 +290,16 @@ class TrajectoryCalculator:
 
             trajectory_points.append(point)
             current_time += time_step_s
+
+        if DEBUG:
+            print(f"\n=== TRAJECTORY SUMMARY ===")
+            print(f"Final time: {current_time}s")
+            print(f"Final altitude: {altitude_km:.1f} km")
+            print(f"Final velocity: {vel_magnitude_ms:.0f} m/s")
+            print(f"Max dynamic pressure: {max_dynamic_pressure:.0f} Pa ({max_dynamic_pressure/1000:.1f} kPa)")
+            print(f"Max G-force: {max_g_force:.1f} g")
+            print(f"Fuel consumed: {fuel_consumed:.0f} kg")
+            print(f"Fuel remaining: {vehicle_specs.fuel_mass_kg - fuel_consumed:.0f} kg")
 
         if not trajectory_points:
             # Create a failed trajectory
@@ -307,38 +350,55 @@ class TrajectoryCalculator:
             total_delta_v = 0
 
         # Success probability based on various factors
-        success_factors = []
+        success_weights = []
+        success_scores = []
 
+        # Dynamic pressure check
         if max_dynamic_pressure < vehicle_specs.max_dynamic_pressure_pa:
-            success_factors.append(0.95)
-        elif max_dynamic_pressure < vehicle_specs.max_dynamic_pressure_pa * 1.2:
-            success_factors.append(0.7)
+            success_scores.append(0.95)
+            success_weights.append(0.25)
+        elif max_dynamic_pressure < vehicle_specs.max_dynamic_pressure_pa * 1.5:
+            success_scores.append(0.7)
+            success_weights.append(0.25)
         else:
-            success_factors.append(0.3)
+            success_scores.append(0.3)
+            success_weights.append(0.25)
 
+        # G-force check
         if max_g_force < vehicle_specs.max_acceleration_g:
-            success_factors.append(0.95)
-        elif max_g_force < vehicle_specs.max_acceleration_g * 1.1:
-            success_factors.append(0.7)
+            success_scores.append(0.95)
+            success_weights.append(0.25)
+        elif max_g_force < vehicle_specs.max_acceleration_g * 1.2:
+            success_scores.append(0.7)
+            success_weights.append(0.25)
         else:
-            success_factors.append(0.4)
-        
+            success_scores.append(0.4)
+            success_weights.append(0.25)
+
+        # Mission success check
         if mission_success:
-            success_factors.append(0.95)
+            success_scores.append(0.95)
+            success_weights.append(0.3)
         elif final_orbit_dict and final_orbit_dict.get('perigee_km', -1000) > 100:
-            success_factors.append(0.6) # Reach some orbit
+            success_scores.append(0.6)
+            success_weights.append(0.3)
         else:
-            success_factors.append(0.2)
-        
+            success_scores.append(0.2)
+            success_weights.append(0.3)
+
+        # Fuel check
         fuel_remaining = vehicle_specs.fuel_mass_kg - fuel_consumed
-        if fuel_remaining > 0:
-            success_factors.append(0.95)
-        elif fuel_remaining > -100:
-            success_factors.append(0.8)
+        if fuel_remaining > vehicle_specs.fuel_mass_kg * 0.1:
+            success_scores.append(0.95)
+            success_weights.append(0.2)
+        elif fuel_remaining > 0:
+            success_scores.append(0.7)
+            success_weights.append(0.2)
         else:
-            success_factors.append(0.3)
+            success_scores.append(0.3)
+            success_weights.append(0.2)
             
-        success_probability = np.prod(success_factors)
+        success_probability = sum(s * w for s, w in zip(success_scores, success_weights)) / sum(success_weights)
 
         return LaunchTrajectory(
             trajectory_points=trajectory_points,

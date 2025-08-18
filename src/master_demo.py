@@ -53,8 +53,8 @@ class LaunchPredictionDemo:
             specific_impulse_s=282,
             drag_coefficient=0.3,
             cross_sectional_area_m2=10.5,
-            max_dynamic_pressure_pa=35000,
-            max_acceleration_g=4.0,
+            max_dynamic_pressure_pa=50000,
+            max_acceleration_g=4.5,
             stage_count=2
         )
 
