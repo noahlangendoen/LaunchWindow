@@ -156,9 +156,9 @@ class TrajectoryCalculator:
                 if fuel_consumed >= vehicle_specs.fuel_mass_kg:
                     thrust_on = False
                     thrust_magnitude = 0.0
-                if altitude_km < target_altitude * 0.5:
-                    # Mission failure due to depletion
-                    break
+                    if altitude_km < target_altitude * 0.5:
+                        # Mission failure due to depletion
+                        break
             else:
                 thrust_magnitude = 0.0
                 thrust_on = False
