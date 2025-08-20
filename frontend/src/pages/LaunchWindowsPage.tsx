@@ -141,29 +141,40 @@ const LaunchWindowsPage: React.FC = () => {
         <div className="bg-slate-800 rounded-lg p-6 mb-8">
           <h2 className="text-lg font-semibold text-white mb-4">Search Parameters</h2>
           
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-            <div>
-              <label className="flex items-center gap-2 mb-4">
-                <input
-                  type="checkbox"
-                  checked={searchAll}
-                  onChange={(e) => setSearchAll(e.target.checked)}
-                  className="rounded bg-slate-700 border-slate-600"
-                />
-                <span className="text-sm text-gray-300">Search All Sites</span>
-              </label>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+            {/* Launch Site Selection */}
+            <div className="flex flex-col">
+              <div className="mb-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={searchAll}
+                    onChange={(e) => setSearchAll(e.target.checked)}
+                    className="rounded bg-slate-700 border-slate-600"
+                  />
+                  <span className="text-sm text-gray-300">Search All Sites</span>
+                </label>
+              </div>
               
-              {!searchAll && (
-                <LaunchSiteSelector
-                  sites={LAUNCH_SITES}
-                  selectedSite={selectedSite}
-                  onSiteChange={setSelectedSite}
-                  disabled={isLoading}
-                />
-              )}
+              <div className="flex-1 flex flex-col justify-end">
+                {!searchAll && (
+                  <>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Launch Site
+                    </label>
+                    <LaunchSiteSelector
+                      sites={LAUNCH_SITES}
+                      selectedSite={selectedSite}
+                      onSiteChange={setSelectedSite}
+                      disabled={isLoading}
+                    />
+                  </>
+                )}
+              </div>
             </div>
             
-            <div>
+            {/* Search Duration */}
+            <div className="flex flex-col justify-end">
               <label className="block text-sm font-medium text-gray-300 mb-2">
                 Search Duration (hours)
               </label>
@@ -171,7 +182,7 @@ const LaunchWindowsPage: React.FC = () => {
                 value={duration}
                 onChange={(e) => setDuration(Number(e.target.value))}
                 disabled={isLoading}
-                className="w-full bg-slate-700 text-white rounded-lg px-4 py-2 border border-slate-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+                className="w-full bg-slate-700 text-white rounded-lg px-4 py-2 border border-slate-600 focus:border-blue-500 focus:outline-none disabled:opacity-50 h-10"
               >
                 <option value={24}>24 hours</option>
                 <option value={48}>48 hours</option>
@@ -180,11 +191,13 @@ const LaunchWindowsPage: React.FC = () => {
               </select>
             </div>
             
-            <div className="flex items-end">
+            {/* Find Windows Button */}
+            <div className="flex flex-col justify-end">
+              <div className="h-6 mb-2"></div> {/* Spacer to align with labels */}
               <button
                 onClick={findWindows}
                 disabled={isLoading}
-                className="w-full bg-blue-600 text-white font-medium py-2 px-6 rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-colors"
+                className="w-full bg-blue-600 text-white font-medium py-2 px-6 rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-colors h-10"
               >
                 {isLoading ? (
                   <div className="flex items-center justify-center gap-2">
@@ -196,38 +209,45 @@ const LaunchWindowsPage: React.FC = () => {
                 )}
               </button>
             </div>
-            
-            {/* Summary Stats */}
-            {Object.keys(launchWindows).length > 0 && (
-              <div className="bg-slate-700 rounded-lg p-4">
-                <h4 className="font-medium text-white mb-2">Summary</h4>
-                <div className="space-y-1 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-300">Total Windows:</span>
-                    <span className="text-white">{getTotalWindowsCount()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-300">Go Windows:</span>
-                    <span className="text-green-400">{getGoWindowsCount()}</span>
-                  </div>
+          </div>
+          
+          {/* Summary Stats */}
+          {Object.keys(launchWindows).length > 0 && (
+            <div className="bg-slate-700 rounded-lg p-4 mb-6">
+              <h4 className="font-medium text-white mb-3">Search Results Summary</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-white">{getTotalWindowsCount()}</div>
+                  <div className="text-sm text-gray-300">Total Windows</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-green-400">{getGoWindowsCount()}</div>
+                  <div className="text-sm text-gray-300">Go Windows</div>
+                </div>
+                <div className="text-center">
                   {(() => {
                     const best = getBestOverallWindow();
                     return best ? (
-                      <div className="pt-2 border-t border-slate-600">
-                        <div className="text-xs text-gray-400 mb-1">Best Window:</div>
-                        <div className="text-white font-medium">
+                      <div>
+                        <div className="text-2xl font-bold text-blue-400">
+                          {best.window.window_score.toFixed(3)}
+                        </div>
+                        <div className="text-sm text-gray-300">Best Score</div>
+                        <div className="text-xs text-gray-400 mt-1">
                           {LAUNCH_SITES.find(s => s.code === best.siteCode)?.name}
                         </div>
-                        <div className="text-blue-400 text-xs">
-                          Score: {best.window.window_score.toFixed(3)}
-                        </div>
                       </div>
-                    ) : null;
+                    ) : (
+                      <div>
+                        <div className="text-2xl font-bold text-gray-500">-</div>
+                        <div className="text-sm text-gray-300">Best Score</div>
+                      </div>
+                    );
                   })()}
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Results */}
