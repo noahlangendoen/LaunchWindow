@@ -3,9 +3,9 @@
       "builder": "NIXPACKS"
     },
     "deploy": {
-      "startCommand": "python src/api/app.py",
+      "startCommand": "python start.py",
       "healthcheckPath": "/health",
-      "healthcheckTimeout": 300,
-      "restartPolicyType": "always"
+      "healthcheckTimeout": 180,
+      "restartPolicyType": "ON_FAILURE"
     }
 }

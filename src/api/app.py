@@ -3,33 +3,65 @@ from flask_cors import CORS
 import sys
 import os
 from datetime import datetime, timedelta
-
-# Add project root to path
-script_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(script_dir))
-sys.path.insert(0, project_root)
-
-# Import the existing demo classes
-from src.master_demo import LaunchPredictionDemo
-from src.data_ingestion.collect_weather import WeatherCollector
-from src.ml_models.success_predictor import LaunchSuccessPredictor
-from src.physics_engine.trajectory_calc import TrajectoryCalculator, VehicleSpecs
+import traceback
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-# Initialize system components
-demo = LaunchPredictionDemo()
+# Global variables for components
+demo = None
+is_initialized = False
+
+def initialize_components():
+    """Initialize components with error handling"""
+    global demo, is_initialized
+    try:
+        # Add project root to path
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(script_dir))
+        sys.path.insert(0, project_root)
+
+        # Import the existing demo classes
+        from src.master_demo import LaunchPredictionDemo
+        
+        print("Initializing LaunchPredictionDemo...")
+        demo = LaunchPredictionDemo()
+        is_initialized = True
+        print("Components initialized successfully!")
+        
+    except Exception as e:
+        print(f"Error initializing components: {e}")
+        print(f"Traceback: {traceback.format_exc()}")
+        is_initialized = False
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
+    try:
+        return jsonify({
+            'status': 'healthy', 
+            'timestamp': datetime.now().isoformat(),
+            'components_initialized': is_initialized,
+            'python_version': sys.version,
+            'working_directory': os.getcwd()
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 @app.route('/prediction', methods=['POST'])
 def run_prediction():
     """Run launch success prediction for a specific site"""
     try:
+        if not is_initialized:
+            initialize_components()
+            
+        if not is_initialized or demo is None:
+            return jsonify({'error': 'System components not initialized'}), 503
+            
         data = request.get_json()
         site_code = data.get('site_code', 'KSC')
         
@@ -223,7 +255,16 @@ def get_system_status():
 
 if __name__ == '__main__':
     print("Starting Launch Prediction API Server...")
+    print(f"Python version: {sys.version}")
+    print(f"Working directory: {os.getcwd()}")
+    
+    # Try to initialize components but don't fail if it doesn't work
+    print("Attempting to initialize components...")
+    initialize_components()
+    
     port = int(os.environ.get('PORT', 8000))
-    print(f"Frontend: http://localhost:3000")
-    print(f"API: http://localhost:{port}")
+    print(f"Starting server on port {port}")
+    print(f"Health check: http://localhost:{port}/health")
+    
+    # Start the Flask app
     app.run(debug=False, host='0.0.0.0', port=port)
