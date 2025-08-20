@@ -1,7 +1,7 @@
-import React, { useRef, useMemo } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import React, { useRef } from 'react';
+import { Canvas} from '@react-three/fiber';
 import { OrbitControls, Sphere, Line, Stars } from '@react-three/drei';
-import { Vector3, CanvasTexture, MathUtils } from 'three';
+import { Vector3} from 'three';
 import { LaunchTrajectory } from '../types';
 
 interface EarthProps {
