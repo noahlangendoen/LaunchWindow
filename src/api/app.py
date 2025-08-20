@@ -223,6 +223,7 @@ def get_system_status():
 
 if __name__ == '__main__':
     print("Starting Launch Prediction API Server...")
-    print("Frontend: http://localhost:3000")
-    print("API: http://localhost:8000")
-    app.run(debug=True, host='0.0.0.0', port=8000)
+    port = int(os.environ.get('PORT', 8000))
+    print(f"Frontend: http://localhost:3000")
+    print(f"API: http://localhost:{port}")
+    app.run(debug=False, host='0.0.0.0', port=port)

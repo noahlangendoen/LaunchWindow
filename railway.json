@@ -4,6 +4,8 @@
     },
     "deploy": {
       "startCommand": "python src/api/app.py",
-      "healthcheckPath": "/health"
+      "healthcheckPath": "/health",
+      "healthcheckTimeout": 300,
+      "restartPolicyType": "always"
     }
 }
