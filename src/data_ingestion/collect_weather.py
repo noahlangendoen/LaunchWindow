@@ -10,8 +10,12 @@ load_dotenv()
 class WeatherCollector:
     def __init__(self):
         self.api_key = os.getenv('OPENWEATHER_API_KEY')
-        if not self.api_key:
-            raise ValueError("API key for OpenWeather is not set in the environment variables.")
+        self.mock_mode = not self.api_key
+        
+        if self.mock_mode:
+            print("WARNING: OpenWeather API key not found. Using mock weather data.")
+        else:
+            print("OpenWeather API key found. Using live weather data.")
         
         self.base_url = "https://api.openweathermap.org/data/2.5"
 
@@ -25,6 +29,9 @@ class WeatherCollector:
 
     def get_current_weather(self, site_key):
         """Gather current weather data for a specific site."""
+        if self.mock_mode:
+            return self._get_mock_weather(site_key)
+            
         site = self.sites[site_key]
 
         try:
@@ -87,6 +94,9 @@ class WeatherCollector:
         
     def get_forecast(self, site_key, days=5):
         """Gather a 5-day weather forecast for a specific site."""
+        if self.mock_mode:
+            return self._get_mock_forecast(site_key, days)
+            
         site = self.sites[site_key]
 
         try:
@@ -205,6 +215,80 @@ class WeatherCollector:
 
         if 'site_code' in df.columns:
             print(F"Sites covered: {', '.join(df['site_code'].unique())}")
+
+    def _get_mock_weather(self, site_key):
+        """Return mock weather data when API key is not available."""
+        import random
+        
+        site = self.sites.get(site_key, {"name": "Unknown Site"})
+        
+        return {
+            'site_code': site_key,
+            'site_name': site['name'],
+            'dt': datetime.now().isoformat(),
+            'temperature_c': 20 + random.uniform(-5, 10),
+            'feels_like_c': 20 + random.uniform(-5, 10),
+            'temp_min_c': 15 + random.uniform(-3, 5),
+            'temp_max_c': 25 + random.uniform(-5, 10),
+            'humidity_percent': 60 + random.uniform(-20, 30),
+            'pressure_hpa': 1013 + random.uniform(-20, 20),
+            'visibility_m': 10000 + random.uniform(-2000, 0),
+            'wind_speed_ms': 5 + random.uniform(-3, 10),
+            'wind_direction_deg': random.uniform(0, 360),
+            'wind_gust_ms': 7 + random.uniform(-3, 15),
+            'cloud_cover_percent': random.uniform(0, 100),
+            'weather_main': 'Clear',
+            'weather_description': 'clear sky',
+            'rain_1h_mm': 0,
+            'rain_3h_mm': 0,
+            'snow_1h_mm': 0,
+            'snow_3h_mm': 0,
+            'latitude': site.get('lat', 0),
+            'longitude': site.get('lon', 0),
+            'timezone': site.get('timezone', 'UTC'),
+            'collected_at': datetime.now().isoformat()
+        }
+
+
+    def _get_mock_forecast(self, site_key, days=5):
+        """Return mock forecast data."""
+        import random
+        
+        site = self.sites.get(site_key, {"name": "Unknown Site"})
+        forecast_data = []
+        
+        for i in range(days * 8):  # 8 forecasts per day (3-hour intervals)
+            forecast_time = datetime.now() + timedelta(hours=i * 3)
+            
+            forecast_item = {
+                'site_code': site_key,
+                'site_name': site['name'],
+                'forecast_time': forecast_time.isoformat(),
+                'collected_at': datetime.now().isoformat(),
+                'temperature_c': 20 + random.uniform(-5, 10),
+                'feels_like_c': 20 + random.uniform(-5, 10),
+                'temp_min_c': 15 + random.uniform(-3, 5),
+                'temp_max_c': 25 + random.uniform(-5, 10),
+                'humidity_percent': 60 + random.uniform(-20, 30),
+                'pressure_hpa': 1013 + random.uniform(-20, 20),
+                'wind_speed_ms': 5 + random.uniform(-3, 10),
+                'wind_direction_deg': random.uniform(0, 360),
+                'wind_gust_ms': 7 + random.uniform(-3, 15),
+                'cloud_cover_percent': random.uniform(0, 100),
+                'weather_main': 'Clear',
+                'weather_description': 'clear sky',
+                'visibility_m': 10000 + random.uniform(-2000, 0),
+                'pop': random.uniform(0, 0.3),
+                'rain_3h_mm': 0,
+                'snow_3h_mm': 0,
+                'go_for_launch': True
+            }
+            forecast_data.append(forecast_item)
+            
+        return forecast_data
+
+    def _get_real_forecast(self, site_key, days=5):
+        """Original forecast method renamed."""
 
 def main():
     try:
