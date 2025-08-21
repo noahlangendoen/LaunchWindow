@@ -29,12 +29,23 @@ def initialize_components():
         
         # Load pre-trained model if it exists
         try:
-            demo.predictor.load_model()
-            print("Pre-trained ML model loaded successfully!")
-        except FileNotFoundError:
-            print("No pre-trained model found. Will use fallback calculations.")
+            model_path = "data/models/launch_success_model.pkl"
+            if os.path.exists(model_path):
+                demo.predictor.load_model(model_path)
+                print("Pre-trained ML model loaded successfully!")
+            else:
+                print(f"Model file not found at {model_path}")
+                print("Available files in data/models/:")
+                models_dir = "data/models"
+                if os.path.exists(models_dir):
+                    for f in os.listdir(models_dir):
+                        print(f"  {f}")
+                else:
+                    print("  data/models/ directory does not exist")
         except Exception as e:
             print(f"Error loading ML model: {e}")
+            print(f"Traceback: {traceback.format_exc()}")
+            print("Will use fallback calculations for predictions.")
         
         is_initialized = True
         print("Components initialized successfully!")
@@ -48,10 +59,15 @@ def initialize_components():
 def health_check():
     """Health check endpoint"""
     try:
+        model_status = 'unknown'
+        if is_initialized and demo:
+            model_status = 'trained' if demo.predictor.is_trained else 'not_trained'
+        
         return jsonify({
             'status': 'healthy', 
             'timestamp': datetime.now().isoformat(),
             'components_initialized': is_initialized,
+            'ml_model_status': model_status,
             'python_version': sys.version,
             'working_directory': os.getcwd()
         })
