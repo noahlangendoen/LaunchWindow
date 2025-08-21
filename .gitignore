@@ -172,8 +172,10 @@ id_dsa
 # ===============================================
 
 # Keep CLAUDE.md in version control for now
-# CLAUDE.md
+CLAUDE.md
 
 # Batch files that might contain secrets
 start_with_keys.bat
 deploy_with_secrets.bat
+
+
