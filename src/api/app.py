@@ -26,6 +26,16 @@ def initialize_components():
         
         print("Initializing LaunchPredictionDemo...")
         demo = LaunchPredictionDemo()
+        
+        # Load pre-trained model if it exists
+        try:
+            demo.predictor.load_model()
+            print("Pre-trained ML model loaded successfully!")
+        except FileNotFoundError:
+            print("No pre-trained model found. Will use fallback calculations.")
+        except Exception as e:
+            print(f"Error loading ML model: {e}")
+        
         is_initialized = True
         print("Components initialized successfully!")
         
@@ -86,9 +96,15 @@ def run_prediction():
             'weather_visibility_m': weather.get('visibility_m', 10000)
         }])
         
-        # Make prediction (simplified for demo)
-        success_prob = 0.85 - (weather.get('wind_speed_ms', 5) * 0.02)
-        success_prob = max(0.5, min(0.95, success_prob))
+        # Use actual ML model for prediction
+        try:
+            prediction_result = demo.predictor.predict_launch_success(features)
+            success_prob = prediction_result['success_probability']
+        except Exception as e:
+            print(f"ML model prediction failed: {e}")
+            # Fallback calculation only if ML model fails
+            success_prob = 0.85 - (weather.get('wind_speed_ms', 5) * 0.02)
+            success_prob = max(0.5, min(0.95, success_prob))
         
         # Assess risk
         if success_prob >= 0.8:
