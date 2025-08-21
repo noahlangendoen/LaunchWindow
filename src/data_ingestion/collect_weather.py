@@ -30,6 +30,7 @@ class WeatherCollector:
     def get_current_weather(self, site_key):
         """Gather current weather data for a specific site."""
         if self.mock_mode:
+            print(f"Mock Data Used for weather at {site_key}")
             return self._get_mock_weather(site_key)
             
         site = self.sites[site_key]
@@ -87,6 +88,7 @@ class WeatherCollector:
                 'timezone': site['timezone']
             }
 
+            print(f"Real Data Used for weather at {site_key}")
             return weather_data
         except requests.exceptions.RequestException as e:
             print(f"Error fetching current weather for {site_key}: {e}")
@@ -95,6 +97,7 @@ class WeatherCollector:
     def get_forecast(self, site_key, days=5):
         """Gather a 5-day weather forecast for a specific site."""
         if self.mock_mode:
+            print(f"Mock Data Used for forecast at {site_key}")
             return self._get_mock_forecast(site_key, days)
             
         site = self.sites[site_key]
@@ -155,6 +158,7 @@ class WeatherCollector:
 
                 forecast_data.append(forecast_item)
 
+            print(f"Real Data Used for forecast at {site_key}")
             return forecast_data
         
         except requests.exceptions.RequestException as e:
