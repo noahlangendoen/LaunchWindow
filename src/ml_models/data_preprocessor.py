@@ -527,7 +527,7 @@ class DataPreprocessor:
 
         return df_integrated
     
-    def create_training_dataset(self, target_column: str = 'success') -> Tuple[pd.DataFrame, pd.Series]:
+    def create_training_dataset(self, target_column: str = 'success', exclude_weather_features: bool = True) -> Tuple[pd.DataFrame, pd.Series]:
         """Create a complete training dataset for machine learning."""
         if not self.processed_data:
             print("No data loaded. Please run load_all_data() first.")
@@ -567,8 +567,13 @@ class DataPreprocessor:
         if orbital_data is not None:
             orbital_data = self.clean_orbital_data(orbital_data)
 
-        # Engineer features
-        df_features = self.engineer_features(combined_launches, weather_data, orbital_data)
+        # Engineer features (conditionally exclude weather for historical training)
+        if exclude_weather_features:
+            df_features = self.engineer_features(combined_launches, None, orbital_data)
+            print("Weather features excluded from training dataset to avoid imputation artifacts.")
+        else:
+            df_features = self.engineer_features(combined_launches, weather_data, orbital_data)
+            print("Weather features included in training dataset.")
 
         # Ensure target column exists and is clean
         if target_column not in df_features.columns:
@@ -595,6 +600,13 @@ class DataPreprocessor:
         ]
 
         feature_columns = [col for col in df_features.columns if col not in exclude_columns]
+        
+        # Additional filtering for weather features if requested
+        if exclude_weather_features:
+            weather_related_columns = [col for col in feature_columns if 'weather_' in col.lower()]
+            if weather_related_columns:
+                print(f"Excluding {len(weather_related_columns)} weather-related columns: {weather_related_columns[:5]}...")
+                feature_columns = [col for col in feature_columns if 'weather_' not in col.lower()]
 
         X = df_features[feature_columns]
 
@@ -621,6 +633,11 @@ class DataPreprocessor:
 
             # Now do one-hot encoding
             X_encoded = pd.get_dummies(X[categorical_cols], prefix_sep='_', drop_first=True)
+            
+            # Clean feature names for XGBoost compatibility
+            X_encoded.columns = [col.replace('[', '_').replace(']', '_').replace('<', '_').replace('>', '_').replace(',', '_') 
+                               for col in X_encoded.columns]
+            
             X_final = pd.concat([X[numeric_cols], X_encoded], axis=1)
         else:
             X_final = X[numeric_cols].copy()

@@ -97,52 +97,85 @@ def run_prediction():
         if not weather:
             return jsonify({'error': 'No weather data available'}), 400
         
-        # Create prediction features
+        # Create prediction features (weather-independent for ML model)
         import pandas as pd
-        features = pd.DataFrame([{
+        launch_features = pd.DataFrame([{
             'rocket_name': demo.demo_vehicle.name,
             'mission_type': 'Commercial',
             'payload_mass_kg': 15000,
-            'launch_site': demo.launch_sites.get(site_code, 'Unknown'),
-            'weather_temperature_c': weather.get('temperature_c', 20),
-            'weather_pressure_hpa': weather.get('pressure_hpa', 1013),
-            'weather_humidity_percent': weather.get('humidity_percent', 60),
-            'weather_wind_speed_ms': weather.get('wind_speed_ms', 5),
-            'weather_cloud_cover_percent': weather.get('cloud_cover_percent', 20),
-            'weather_visibility_m': weather.get('visibility_m', 10000)
+            'launch_provider': 'SpaceX',  # Example provider
+            'is_commercial': True,
+            'is_reusable': True,
+            'mission_complexity': 2,  # Commercial satellite deployment
+            'payload_category': 'Heavy',  # 15000 kg
+            'launch_year': datetime.now().year,
+            'launch_month': datetime.now().month,
+            'launch_hour': datetime.now().hour,
+            'launch_day_of_week': datetime.now().weekday()
         }])
         
-        # Use actual ML model for prediction
+        # Use combined ML + weather constraint prediction
         try:
-            prediction_result = demo.predictor.predict_launch_success(features)
-            success_prob = prediction_result['success_probability']
+            combined_result = demo.predictor.predict_with_weather_constraints(
+                launch_features, weather, site_code
+            )
+            
+            return jsonify({
+                'success_probability': combined_result['combined_assessment']['combined_success_probability'],
+                'risk_assessment': combined_result['combined_assessment']['overall_risk_level'],
+                'recommendation': combined_result['combined_assessment']['overall_recommendation'],
+                'weather_status': 'GO' if combined_result['weather_assessment']['go_for_launch'] else 'NO GO',
+                'site_name': demo.launch_sites.get(site_code, site_code),
+                'detailed_analysis': {
+                    'ml_prediction': combined_result['ml_prediction'],
+                    'weather_assessment': combined_result['weather_assessment'],
+                    'confidence': combined_result['combined_assessment']['confidence_level']
+                },
+                'methodology': 'Combined ML (weather-independent) + Physics-based weather constraints'
+            })
+            
         except Exception as e:
-            print(f"ML model prediction failed: {e}")
-            # Fallback calculation only if ML model fails
-            success_prob = 0.85 - (weather.get('wind_speed_ms', 5) * 0.02)
-            success_prob = max(0.5, min(0.95, success_prob))
-        
-        # Assess risk
-        if success_prob >= 0.8:
-            risk = 'Low'
-            recommendation = 'Proceed with launch. All conditions are favorable.'
-        elif success_prob >= 0.6:
-            risk = 'Medium'
-            recommendation = 'Launch conditions are acceptable. Monitor weather conditions closely.'
-        else:
-            risk = 'High'
-            recommendation = 'Consider delaying launch. Weather conditions present elevated risks.'
-        
-        # Weather status
-        weather_go = weather.get('wind_speed_ms', 5) < 15 and weather.get('temperature_c', 20) > -5
-        
-        return jsonify({
-            'success_probability': success_prob,
-            'risk_assessment': risk,
-            'recommendation': recommendation,
-            'weather_status': 'GO' if weather_go else 'NO GO',
-            'site_name': demo.launch_sites.get(site_code, site_code)
-        })
+            print(f"Combined prediction failed: {e}")
+            print(f"Traceback: {traceback.format_exc()}")
+            
+            # Fallback to simpler prediction if new method fails
+            try:
+                # Try weather-independent ML prediction only
+                ml_result = demo.predictor.predict_launch_success(launch_features)
+                success_prob = ml_result['success_probability']
+                
+                # Simple weather check
+                weather_go = (weather.get('wind_speed_ms', 5) < 15 and 
+                             weather.get('temperature_c', 20) > -5 and
+                             weather.get('rain_1h_mm', 0) < 0.1)
+                
+                if not weather_go:
+                    success_prob *= 0.3  # Reduce probability if weather is poor
+                
+                risk = 'Low' if success_prob >= 0.8 else 'Medium' if success_prob >= 0.6 else 'High'
+                
+                return jsonify({
+                    'success_probability': success_prob,
+                    'risk_assessment': risk,
+                    'recommendation': ml_result['recommendation'],
+                    'weather_status': 'GO' if weather_go else 'NO GO',
+                    'site_name': demo.launch_sites.get(site_code, site_code),
+                    'methodology': 'Fallback: ML prediction with basic weather check'
+                })
+                
+            except Exception as e2:
+                print(f"Fallback prediction also failed: {e2}")
+                # Ultimate fallback
+                success_prob = 0.75
+                return jsonify({
+                    'success_probability': success_prob,
+                    'risk_assessment': 'Medium',
+                    'recommendation': 'Unable to generate detailed prediction',
+                    'weather_status': 'UNKNOWN',
+                    'site_name': demo.launch_sites.get(site_code, site_code),
+                    'error': 'Prediction system unavailable',
+                    'methodology': 'Static fallback'
+                })
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500

@@ -12,6 +12,7 @@ from typing import Dict, Tuple, List, Optional
 import matplotlib.pyplot as plt
 import seaborn as sns
 from .data_preprocessor import DataPreprocessor
+from .weather_constraints import WeatherConstraintChecker, WeatherConstraints
 
 
 class LaunchSuccessPredictor:
@@ -213,6 +214,93 @@ class LaunchSuccessPredictor:
         
         return results if len(results) > 1 else results[0]
     
+    def predict_with_weather_constraints(self, launch_features: pd.DataFrame, 
+                                       weather_data: Dict, 
+                                       site_code: str = None) -> Dict:
+        """
+        Comprehensive prediction combining ML model with weather constraint checking.
+        
+        Args:
+            launch_features: Non-weather launch features (rocket, mission, etc.)
+            weather_data: Current weather conditions
+            site_code: Launch site code for site-specific constraints
+            
+        Returns:
+            Combined prediction with ML success probability and weather assessment
+        """
+        if not self.is_trained:
+            raise ValueError("Model must be trained before making predictions.")
+        
+        # Initialize weather constraint checker
+        weather_checker = WeatherConstraintChecker()
+        site_constraints = weather_checker.get_site_specific_constraints(site_code) if site_code else None
+        
+        # Get weather assessment
+        weather_assessment = weather_checker.assess_launch_weather(weather_data, site_constraints)
+        
+        # Get ML prediction (weather-independent)
+        ml_prediction = self.predict_launch_success(launch_features)
+        
+        # Combine predictions
+        if isinstance(ml_prediction, list):
+            ml_prediction = ml_prediction[0]  # Take first result if multiple
+            
+        # Calculate combined risk assessment
+        ml_success_prob = ml_prediction['success_probability']
+        weather_score = weather_assessment.weather_score
+        
+        # Combined success probability (weighted combination)
+        if weather_assessment.go_for_launch:
+            # Weather OK - use ML prediction modulated by weather quality
+            combined_success_prob = ml_success_prob * (0.7 + 0.3 * weather_score)
+        else:
+            # Weather constraints violated - significantly reduce probability
+            combined_success_prob = ml_success_prob * 0.1 * weather_score
+            
+        # Determine overall recommendation
+        if not weather_assessment.go_for_launch:
+            overall_recommendation = "NO GO - Weather constraints violated"
+            overall_risk = "CRITICAL"
+        elif combined_success_prob > 0.8 and weather_assessment.overall_risk_level in ["LOW", "MEDIUM"]:
+            overall_recommendation = "GO - Favorable conditions"
+            overall_risk = "LOW"
+        elif combined_success_prob > 0.6:
+            overall_recommendation = "CAUTION - Monitor conditions closely"
+            overall_risk = "MEDIUM"
+        else:
+            overall_recommendation = "CONSIDER DELAY - Marginal conditions"
+            overall_risk = "HIGH"
+            
+        return {
+            'combined_assessment': {
+                'overall_recommendation': overall_recommendation,
+                'combined_success_probability': combined_success_prob,
+                'overall_risk_level': overall_risk,
+                'confidence_level': weather_assessment.confidence_level
+            },
+            'ml_prediction': {
+                'success_probability': ml_success_prob,
+                'binary_prediction': ml_prediction['binary_prediction'],
+                'confidence_level': ml_prediction['confidence_level'],
+                'risk_assessment': ml_prediction['risk_assessment'],
+                'recommendation': ml_prediction['recommendation']
+            },
+            'weather_assessment': {
+                'go_for_launch': weather_assessment.go_for_launch,
+                'weather_score': weather_assessment.weather_score,
+                'risk_level': weather_assessment.overall_risk_level,
+                'violated_constraints': weather_assessment.violated_constraints,
+                'risk_factors': weather_assessment.risk_factors
+            },
+            'detailed_analysis': {
+                'ml_weight': 0.7,
+                'weather_weight': 0.3,
+                'weather_modulation_factor': weather_score,
+                'constraint_violations': len(weather_assessment.violated_constraints),
+                'assessment_timestamp': weather_assessment.assessment_time.isoformat()
+            }
+        }
+    
     def _calculate_confidence(self, probability: float) -> str:
         """Calculate confidence level based on probability."""
         if probability > 0.8 or probability < 0.2:
@@ -355,7 +443,8 @@ def main():
     # Load and prepare data
     datasets = preprocessor.load_all_data()
     if datasets:
-        X, y = preprocessor.create_training_dataset(target_column='success')
+        # Use weather-free training to avoid imputation artifacts from historical data
+        X, y = preprocessor.create_training_dataset(target_column='success', exclude_weather_features=True)
         if X is not None and len(X) > 0:
             # Train the model
             metrics = predictor.train_model(X, y, model_type='random_forest')
