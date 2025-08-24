@@ -105,10 +105,8 @@ const TrajectoryPage: React.FC = () => {
       
       // Start at launch site position on Earth surface
       const lat0Rad = (site.latitude * Math.PI) / 180;
-      const lon0Rad = (site.longitude * Math.PI) / 180;
       
       // Calculate downrange movement (simplified - eastward launch)
-      const earthCircumference = 2 * Math.PI * earthRadius;
       const deltaLonRad = (downrange / earthRadius) * Math.cos(lat0Rad); // Account for latitude
       
       const lat = site.latitude;

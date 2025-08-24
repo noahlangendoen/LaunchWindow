@@ -2,7 +2,9 @@ import axios from 'axios';
 import { LaunchTrajectory, LaunchWindow, PredictionResult, WeatherData } from '../types';
 
 const api = axios.create({
-  baseURL: 'https://launchwindow-production.up.railway.app',
+  baseURL: process.env.NODE_ENV === 'production' 
+    ? 'https://launchwindow-production.up.railway.app'
+    : 'http://localhost:8000',
   timeout: 30000,
 });
 
