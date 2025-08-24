@@ -20,6 +20,7 @@ const TrajectoryPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [targetAltitude, setTargetAltitude] = useState(400);
   const [targetInclination, setTargetInclination] = useState(28.5);
+  const [visibleSites, setVisibleSites] = useState<string[]>(['KSC', 'VSFB', 'CCAFS']);
 
   useEffect(() => {
     loadWeatherData();
@@ -87,25 +88,52 @@ const TrajectoryPage: React.FC = () => {
 
   const generateMockTrajectoryPoints = () => {
     const points = [];
+    const site = LAUNCH_SITES.find(s => s.code === selectedSite);
+    if (!site) return [];
+
+    const earthRadius = 6371; // Earth radius in km
+    
     for (let i = 0; i < 100; i++) {
       const t = i * 5; // 5 second intervals
-      const altitude = Math.min(targetAltitude, (i / 100) * targetAltitude * 1.2);
-      const radius = 6371 + altitude;
+      const progress = i / 99; // 0 to 1
+      
+      // Realistic altitude progression: exponential curve that levels off
+      const altitude = targetAltitude * (1 - Math.exp(-3 * progress));
+      
+      // Launch trajectory parameters
+      const downrange = progress * 1000; // Distance traveled horizontally (km)
+      
+      // Start at launch site position on Earth surface
+      const lat0Rad = (site.latitude * Math.PI) / 180;
+      const lon0Rad = (site.longitude * Math.PI) / 180;
+      
+      // Calculate downrange movement (simplified - eastward launch)
+      const earthCircumference = 2 * Math.PI * earthRadius;
+      const deltaLonRad = (downrange / earthRadius) * Math.cos(lat0Rad); // Account for latitude
+      
+      const lat = site.latitude;
+      const lon = site.longitude + (deltaLonRad * 180) / Math.PI;
+      
+      // Convert to Cartesian coordinates (km from Earth center)
+      // Fix: Use same coordinate system as US landmass (flip longitude)
+      const latRad = (lat * Math.PI) / 180;
+      const lonRad = (-lon * Math.PI) / 180; // Flip longitude to match landmass
+      const totalRadius = earthRadius + altitude;
+      
+      const x = totalRadius * Math.cos(latRad) * Math.cos(lonRad);
+      const y = totalRadius * Math.sin(latRad);
+      const z = totalRadius * Math.cos(latRad) * Math.sin(lonRad);
       
       points.push({
         time_s: t,
-        position: [
-          radius * Math.cos(i * 0.1),
-          radius * Math.sin(i * 0.05),
-          radius * Math.sin(i * 0.1) * 0.3
-        ] as [number, number, number],
+        position: [x, y, z] as [number, number, number],
         velocity: [7.8, 0, 0] as [number, number, number],
         altitude_km: altitude,
-        velocity_magnitude_ms: 7800,
+        velocity_magnitude_ms: 1000 + (progress * 6800), // 1 km/s to 7.8 km/s
         acceleration: [0, -9.8, 0] as [number, number, number],
         mass_kg: 550000 - (i * 1000),
-        thrust_n: 7607000,
-        drag_n: 50000,
+        thrust_n: Math.max(0, 7607000 - (i * 60000)),
+        drag_n: Math.max(0, 50000 - (i * 500)),
         dynamic_pressure_pa: Math.max(0, 50000 - (i * 500)),
         mach_number: Math.max(1, 25 - (i * 0.2)),
         g_force: Math.max(1, 4 - (i * 0.03)),
@@ -113,6 +141,14 @@ const TrajectoryPage: React.FC = () => {
       });
     }
     return points;
+  };
+
+  const handleSiteToggle = (siteCode: string) => {
+    setVisibleSites(prev => 
+      prev.includes(siteCode) 
+        ? prev.filter(code => code !== siteCode)
+        : [...prev, siteCode]
+    );
   };
 
   return (
@@ -146,6 +182,8 @@ const TrajectoryPage: React.FC = () => {
               <TrajectoryVisualization
                 trajectoryData={trajectoryData}
                 isSimulating={isSimulating}
+                visibleSites={visibleSites}
+                onSiteToggle={handleSiteToggle}
                 className="h-96"
               />
             </div>
@@ -215,7 +253,7 @@ const TrajectoryPage: React.FC = () => {
             {/* Trajectory Data */}
             {trajectoryData && (
               <div className="bg-slate-800 rounded-lg p-6 mt-6">
-                <h3 className="text-lg font-semibold text-white mb-4">Mission Results</h3>
+                <h3 className="text-lg font-semibold text-white mb-4">Mission Results -- Based Vehicle Specifications</h3>
                 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                   <div className="text-center">

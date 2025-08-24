@@ -439,27 +439,34 @@ class TrajectoryCalculator:
             )
 
             # Calculate trajectory for this time
-            if weather_assessment['go_for_launch']:
-                trajectory = self.calculate_launch_trajectory(
-                    launch_site, target_orbit, vehicle_specs, closest_weather, current_time
-                )
+            trajectory = self.calculate_launch_trajectory(
+                launch_site, target_orbit, vehicle_specs, closest_weather, current_time
+            )
             
-                window_score = (trajectory.success_probability * 
-                                (1 if trajectory.mission_objectives_met else 0.1) *
-                                (1 if trajectory.launch_constraints_met else 0.1))
-                
-                launch_windows.append({
-                    'launch_time': current_time,
-                    'success_probability': trajectory.success_probability,
-                    'window_score': window_score,
-                    'weather_conditions': closest_weather,
-                    'trajectory_summary': {
-                        'max_dynamic_pressure': trajectory.max_dynamic_pressure,
-                        'max_g_force': trajectory.max_g_force,
-                        'fuel_remaining': trajectory.fuel_remaining_kg,
-                        'final_orbit': trajectory.final_orbit_elements
-                    }
-                })
+            # Calculate base score from mission parameters
+            base_score = (trajectory.success_probability * 
+                         (1 if trajectory.mission_objectives_met else 0.1) *
+                         (1 if trajectory.launch_constraints_met else 0.1))
+            
+            # Apply weather penalty for NO-GO conditions
+            weather_penalty = 1.0 if weather_assessment['go_for_launch'] else 0.3
+            
+            # Final window score includes weather assessment
+            window_score = base_score * weather_penalty
+            
+            launch_windows.append({
+                'launch_time': current_time,
+                'success_probability': trajectory.success_probability,
+                'window_score': window_score,
+                'weather_conditions': closest_weather,
+                'go_for_launch': weather_assessment['go_for_launch'],
+                'trajectory_summary': {
+                    'max_dynamic_pressure': trajectory.max_dynamic_pressure,
+                    'max_g_force': trajectory.max_g_force,
+                    'fuel_remaining': trajectory.fuel_remaining_kg,
+                    'final_orbit': trajectory.final_orbit_elements
+                }
+            })
 
             current_time += time_step
         

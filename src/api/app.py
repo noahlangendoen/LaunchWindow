@@ -365,7 +365,7 @@ def find_launch_windows():
                 'window_score': window['window_score'],
                 'success_probability': window['success_probability'],
                 'weather_conditions': window['weather_conditions'],
-                'go_for_launch': window.get('go_for_launch', window['weather_conditions'].get('go_for_launch', True))
+                'go_for_launch': window.get('go_for_launch', True)
             })
         
         return jsonify(windows_data)
