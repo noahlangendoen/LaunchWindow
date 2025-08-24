@@ -76,7 +76,15 @@ const LaunchWindowsPage: React.FC = () => {
       });
     }
     
-    return windows.sort((a, b) => b.window_score - a.window_score);
+    // Sort by GO status first (GO windows always come before NO-GO), then by score
+    return windows.sort((a, b) => {
+      // If GO status is different, prioritize GO windows
+      if (a.go_for_launch !== b.go_for_launch) {
+        return a.go_for_launch ? -1 : 1; // GO windows come first
+      }
+      // If GO status is the same, sort by window score
+      return b.window_score - a.window_score;
+    });
   };
 
   const getBestOverallWindow = (): { window: LaunchWindow; siteCode: string } | null => {

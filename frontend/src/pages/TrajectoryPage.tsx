@@ -115,8 +115,9 @@ const TrajectoryPage: React.FC = () => {
       const lon = site.longitude + (deltaLonRad * 180) / Math.PI;
       
       // Convert to Cartesian coordinates (km from Earth center)
+      // Fix: Use same coordinate system as US landmass (flip longitude)
       const latRad = (lat * Math.PI) / 180;
-      const lonRad = (lon * Math.PI) / 180;
+      const lonRad = (-lon * Math.PI) / 180; // Flip longitude to match landmass
       const totalRadius = earthRadius + altitude;
       
       const x = totalRadius * Math.cos(latRad) * Math.cos(lonRad);
