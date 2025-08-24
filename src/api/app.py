@@ -1,20 +1,25 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 import sys
 import os
 from datetime import datetime, timedelta
 import traceback
+import atexit
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 # Global variables for components
 demo = None
+weather_service = None
 is_initialized = False
+scheduler = None
 
 def initialize_components():
     """Initialize components with error handling"""
-    global demo, is_initialized
+    global demo, weather_service, scheduler, is_initialized
     try:
         # Add project root to path
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -23,9 +28,13 @@ def initialize_components():
 
         # Import the existing demo classes
         from src.master_demo import LaunchPredictionDemo
+        from src.services.weather_service import WeatherService
         
         print("Initializing LaunchPredictionDemo...")
         demo = LaunchPredictionDemo()
+        
+        print("Initializing WeatherService with caching...")
+        weather_service = WeatherService()
         
         # Load pre-trained model if it exists
         try:
@@ -47,6 +56,35 @@ def initialize_components():
             print(f"Traceback: {traceback.format_exc()}")
             print("Will use fallback calculations for predictions.")
         
+        # Initialize background scheduler for weather updates
+        if scheduler is None:
+            print("Initializing background scheduler...")
+            scheduler = BackgroundScheduler()
+            
+            # Add job to update weather data every 10 minutes
+            scheduler.add_job(
+                func=weather_service.update_all_weather_data,
+                trigger=IntervalTrigger(minutes=10),
+                id='weather_update',
+                name='Update weather data cache',
+                replace_existing=True
+            )
+            
+            scheduler.start()
+            
+            # Ensure scheduler shuts down when app exits
+            atexit.register(lambda: scheduler.shutdown())
+            
+            print("Background scheduler started - weather updates every 10 minutes")
+            
+            # Run an initial weather update
+            try:
+                print("Running initial weather update...")
+                initial_result = weather_service.update_all_weather_data()
+                print(f"Initial update completed: {initial_result}")
+            except Exception as e:
+                print(f"Initial weather update failed: {e}")
+        
         is_initialized = True
         print("Components initialized successfully!")
         
@@ -60,14 +98,25 @@ def health_check():
     """Health check endpoint"""
     try:
         model_status = 'unknown'
+        scheduler_status = 'stopped'
+        weather_cache_status = {}
+        
         if is_initialized and demo:
             model_status = 'trained' if demo.predictor.is_trained else 'not_trained'
+        
+        if scheduler and scheduler.running:
+            scheduler_status = 'running'
+        
+        if weather_service:
+            weather_cache_status = weather_service.get_service_status()
         
         return jsonify({
             'status': 'healthy', 
             'timestamp': datetime.now().isoformat(),
             'components_initialized': is_initialized,
             'ml_model_status': model_status,
+            'scheduler_status': scheduler_status,
+            'weather_cache_status': weather_cache_status,
             'python_version': sys.version,
             'working_directory': os.getcwd()
         })
@@ -91,8 +140,12 @@ def run_prediction():
         data = request.get_json()
         site_code = data.get('site_code', 'KSC')
         
-        # Get current weather for the site
-        weather = demo.weather_collector.get_current_weather(site_code)
+        # Get current weather for the site using cached weather service
+        if weather_service:
+            weather = weather_service.get_current_weather(site_code)
+        else:
+            # Fallback to direct weather collector
+            weather = demo.weather_collector.get_current_weather(site_code)
         
         if not weather:
             return jsonify({'error': 'No weather data available'}), 400
@@ -184,7 +237,13 @@ def run_prediction():
 def get_current_weather(site_code):
     """Get current weather for a launch site"""
     try:
-        weather = demo.weather_collector.get_current_weather(site_code)
+        force_refresh = request.args.get('force_refresh', 'false').lower() == 'true'
+        
+        if weather_service:
+            weather = weather_service.get_current_weather(site_code, force_refresh=force_refresh)
+        else:
+            weather = demo.weather_collector.get_current_weather(site_code)
+        
         if not weather:
             return jsonify({'error': 'Weather data not available'}), 404
         return jsonify(weather)
@@ -196,7 +255,13 @@ def get_weather_forecast(site_code):
     """Get weather forecast for a launch site"""
     try:
         days = request.args.get('days', 5, type=int)
-        forecast = demo.weather_collector.get_forecast(site_code, days=days)
+        force_refresh = request.args.get('force_refresh', 'false').lower() == 'true'
+        
+        if weather_service:
+            forecast = weather_service.get_forecast_weather(site_code, days=days, force_refresh=force_refresh)
+        else:
+            forecast = demo.weather_collector.get_forecast(site_code, days=days)
+        
         if not forecast:
             return jsonify({'error': 'Forecast data not available'}), 404
         return jsonify(forecast)
@@ -215,8 +280,11 @@ def calculate_trajectory():
             'orbit_type': 'LEO'
         })
         
-        # Get weather data
-        weather_data = demo.weather_collector.get_current_weather(site_code)
+        # Get weather data using cached service
+        if weather_service:
+            weather_data = weather_service.get_current_weather(site_code)
+        else:
+            weather_data = demo.weather_collector.get_current_weather(site_code)
         
         # Calculate trajectory
         trajectory = demo.trajectory_calculator.calculate_launch_trajectory(
@@ -266,8 +334,11 @@ def find_launch_windows():
         site_code = data.get('site_code', 'KSC')
         duration_hours = data.get('duration_hours', 48)
         
-        # Get weather forecast
-        forecast_data = demo.weather_collector.get_forecast(site_code, days=5)
+        # Get weather forecast using cached service
+        if weather_service:
+            forecast_data = weather_service.get_forecast_weather(site_code, days=5)
+        else:
+            forecast_data = demo.weather_collector.get_forecast(site_code, days=5)
         
         # Determine target orbit based on site
         target_orbit = {'altitude_km': 400}
@@ -306,15 +377,65 @@ def find_launch_windows():
 def get_system_status():
     """Get system status"""
     try:
+        weather_status = 'Offline'
+        cache_info = {}
+        
+        if weather_service:
+            service_status = weather_service.get_service_status()
+            weather_status = 'Live (Cached)' if service_status.get('api_mode') == 'live' else 'Mock (Cached)'
+            cache_info = service_status.get('cache_status', {})
+        
         return jsonify({
             'ml_model': 'Ready' if demo.predictor.is_trained else 'Training Required',
-            'weather_data': 'Live',
+            'weather_data': weather_status,
+            'weather_cache': cache_info,
+            'scheduler_running': scheduler.running if scheduler else False,
             'physics_engine': 'Ready',
             'trajectory_calculator': 'Ready',
             'last_update': datetime.now().isoformat(),
             'active_sites': len(demo.launch_sites),
             'system_health': 'Operational'
         })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/weather/cache/status', methods=['GET'])
+def get_cache_status():
+    """Get detailed weather cache status"""
+    try:
+        if not weather_service:
+            return jsonify({'error': 'Weather service not initialized'}), 503
+        
+        return jsonify(weather_service.get_service_status())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/weather/cache/refresh', methods=['POST'])
+def refresh_weather_cache():
+    """Manually trigger weather cache refresh"""
+    try:
+        if not weather_service:
+            return jsonify({'error': 'Weather service not initialized'}), 503
+        
+        data = request.get_json() or {}
+        site_code = data.get('site_code')
+        
+        if site_code:
+            # Refresh specific site
+            success = weather_service.force_refresh_site(site_code)
+            return jsonify({
+                'status': 'success' if success else 'failed',
+                'site_code': site_code,
+                'timestamp': datetime.now().isoformat()
+            })
+        else:
+            # Refresh all sites
+            result = weather_service.update_all_weather_data()
+            return jsonify({
+                'status': 'success',
+                'update_result': result,
+                'timestamp': datetime.now().isoformat()
+            })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
