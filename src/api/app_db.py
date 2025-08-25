@@ -35,6 +35,21 @@ db_weather_service = None
 is_initialized = False
 scheduler = None
 
+# Initialize components when module is imported (for Railway deployment)
+def init_on_import():
+    """Initialize components automatically when module is imported."""
+    global is_initialized
+    if not is_initialized:
+        logger.info("Auto-initializing components on module import...")
+        try:
+            initialize_components()
+        except Exception as e:
+            logger.error(f"Failed to auto-initialize components: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+# Call initialization when imported (after Flask app is created)
+init_on_import()
+
 def initialize_components():
     """Initialize components with database integration."""
     global demo, db_weather_service, scheduler, is_initialized
