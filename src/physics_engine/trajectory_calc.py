@@ -66,7 +66,7 @@ class TrajectoryCalculator:
         self.EARTH_MU = 398600.4418  # Gravitational parameter for Earth in km^3/s^2
 
     def calculate_launch_trajectory(self, launch_site: str, target_orbit: Dict, vehicle_specs: VehicleSpecs, weather_data: Dict, 
-                                    launch_time: datetime, time_step_s: float = 1.0) -> LaunchTrajectory:
+                                    launch_time: datetime, time_step_s: float = 1.0, weather_constraints: Dict = None) -> LaunchTrajectory:
         """Calculate complete launch trajectory from surface to orbit."""
 
         DEBUG = False
@@ -400,6 +400,23 @@ class TrajectoryCalculator:
             
         success_probability = sum(s * w for s, w in zip(success_scores, success_weights)) / sum(success_weights)
 
+        # Calculate launch constraints based on weather data
+        if weather_constraints is None:
+            weather_constraints = {
+                'max_wind_speed_ms': 15,
+                'max_wind_gust_ms': 20,
+                'min_temperature_c': -10,
+                'max_temperature_c': 35,
+                'max_precipitation_mm': 0.0,
+                'min_visibility_m': 5000.0,
+                'max_cloud_cover_pct': 50
+            }
+        
+        weather_assessment = self.atmospheric_models.assess_weather_launch_constraints(
+            weather_data, weather_constraints
+        )
+        launch_constraints_met = weather_assessment.get('go_for_launch', True)
+        
         return LaunchTrajectory(
             trajectory_points=trajectory_points,
             success_probability=success_probability,
@@ -408,7 +425,7 @@ class TrajectoryCalculator:
             max_g_force=max_g_force,
             fuel_remaining_kg=fuel_remaining,
             final_orbit_elements=final_orbit_dict,
-            launch_constraints_met=True, # Calculated based on weather constraints
+            launch_constraints_met=launch_constraints_met,
             total_delta_v=total_delta_v
         )
 
@@ -419,47 +436,55 @@ class TrajectoryCalculator:
         current_time = start_time
         end_time = start_time + timedelta(hours=duration_hours)
         time_step = timedelta(minutes=30)
+        
+        weather_constraints = {
+            'max_wind_speed_ms': 15,
+            'max_wind_gust_ms': 20,
+            'min_temperature_c': -10,
+            'max_temperature_c': 35,
+            'max_precipitation_mm': 0.0,
+            'min_visibility_m': 5000.0,
+            'max_cloud_cover_pct': 50
+        }
 
         while current_time < end_time:
             # Find closest weather forecast
             closest_weather = min(weather_forecast, 
                 key=lambda w: abs(datetime.fromisoformat(w['forecast_time'].replace('Z', '+00:00')) - current_time))
             
-            # Assess weather constraints
-            weather_assessment = self.atmospheric_models.assess_weather_launch_constraints(
-                closest_weather, {
-                    'max_wind_speed_ms': 15,
-                    'max_wind_gust_ms': 20,
-                    'min_temperature_c': -10,
-                    'max_temperature_c': 35,
-                    'max_precipitation_mm': 0.0,
-                    'min_visibility_m': 5000.0,
-                    'max_cloud_cover_pct': 50
-                }
-            )
-
-            # Calculate trajectory for this time
+            # Calculate trajectory for this time with proper weather constraints
             trajectory = self.calculate_launch_trajectory(
-                launch_site, target_orbit, vehicle_specs, closest_weather, current_time
+                launch_site, target_orbit, vehicle_specs, closest_weather, current_time, weather_constraints=weather_constraints
             )
             
-            # Calculate base score from mission parameters
-            base_score = (trajectory.success_probability * 
-                         (1 if trajectory.mission_objectives_met else 0.1) *
-                         (1 if trajectory.launch_constraints_met else 0.1))
+            # Calculate orbital mechanics bonus based on launch timing
+            orbital_bonus = self._calculate_orbital_timing_bonus(launch_site, target_orbit, current_time)
             
-            # Apply weather penalty for NO-GO conditions
-            weather_penalty = 1.0 if weather_assessment['go_for_launch'] else 0.3
+            # Calculate weather score (0.0 to 1.0 based on how good conditions are)
+            weather_score = self._calculate_weather_score(closest_weather, weather_constraints)
             
-            # Final window score includes weather assessment
-            window_score = base_score * weather_penalty
+            # Enhanced window scoring with multiple factors
+            base_score = trajectory.success_probability
+            mission_bonus = 1.0 if trajectory.mission_objectives_met else 0.1
+            constraint_bonus = 1.0 if trajectory.launch_constraints_met else 0.1
+            
+            # Composite score with orbital timing and weather quality
+            window_score = (base_score * mission_bonus * constraint_bonus * 
+                          orbital_bonus * weather_score)
             
             launch_windows.append({
                 'launch_time': current_time,
                 'success_probability': trajectory.success_probability,
                 'window_score': window_score,
                 'weather_conditions': closest_weather,
-                'go_for_launch': weather_assessment['go_for_launch'],
+                'go_for_launch': trajectory.launch_constraints_met,
+                'score_breakdown': {
+                    'base_score': base_score,
+                    'mission_bonus': mission_bonus,
+                    'constraint_bonus': constraint_bonus,
+                    'orbital_bonus': orbital_bonus,
+                    'weather_score': weather_score
+                },
                 'trajectory_summary': {
                     'max_dynamic_pressure': trajectory.max_dynamic_pressure,
                     'max_g_force': trajectory.max_g_force,
@@ -820,3 +845,107 @@ class TrajectoryCalculator:
                 recommendations.append("Final orbit deviates significantly from target; consider adjusting launch parameters for better accuracy.")
 
         return recommendations
+    
+    def _calculate_orbital_timing_bonus(self, launch_site: str, target_orbit: Dict, launch_time: datetime) -> float:
+        """Calculate bonus for orbital mechanics timing advantages."""
+        try:
+            site = self.orbital_mechanics.launch_sites[launch_site]
+            target_inclination = target_orbit.get('inclination_deg', 28.5)
+            
+            # Time-based factors
+            hour = launch_time.hour
+            minute = launch_time.minute
+            
+            # Orbital mechanics advantages for different times
+            # Better timing for polar orbits in morning/evening
+            if target_inclination > 90:  # Retrograde/polar
+                if 6 <= hour <= 8 or 18 <= hour <= 20:  # Dawn/dusk
+                    time_bonus = 1.15
+                elif 10 <= hour <= 14:  # Midday
+                    time_bonus = 0.85
+                else:
+                    time_bonus = 1.0
+            else:  # Prograde orbits
+                if 10 <= hour <= 14:  # Midday optimal
+                    time_bonus = 1.1
+                elif hour < 6 or hour > 22:  # Night launches
+                    time_bonus = 0.9
+                else:
+                    time_bonus = 1.0
+            
+            # Fine-tuning based on minutes (orbital period considerations)
+            minute_factor = 1.0 + 0.05 * math.sin(2 * math.pi * minute / 60)
+            
+            return time_bonus * minute_factor
+            
+        except Exception:
+            return 1.0  # Neutral if calculation fails
+    
+    def _calculate_weather_score(self, weather_data: Dict, constraints: Dict) -> float:
+        """Calculate a detailed weather quality score (0.0 to 1.0)."""
+        scores = []
+        weights = []
+        
+        # Wind speed score
+        wind_speed = weather_data.get('wind_speed_ms', 0)
+        max_wind = constraints.get('max_wind_speed_ms', 15)
+        if wind_speed <= max_wind * 0.3:
+            wind_score = 1.0
+        elif wind_speed <= max_wind * 0.6:
+            wind_score = 0.8
+        elif wind_speed <= max_wind:
+            wind_score = 0.5
+        else:
+            wind_score = 0.1
+        scores.append(wind_score)
+        weights.append(0.3)
+        
+        # Temperature score
+        temp = weather_data.get('temperature_c', 20)
+        min_temp = constraints.get('min_temperature_c', -10)
+        max_temp = constraints.get('max_temperature_c', 35)
+        optimal_temp = (min_temp + max_temp) / 2
+        temp_deviation = abs(temp - optimal_temp) / (max_temp - min_temp)
+        temp_score = max(0.1, 1.0 - temp_deviation)
+        scores.append(temp_score)
+        weights.append(0.2)
+        
+        # Precipitation score
+        precip = weather_data.get('rain_1h_mm', 0) + weather_data.get('snow_1h_mm', 0)
+        max_precip = constraints.get('max_precipitation_mm', 0.0)
+        if precip <= max_precip:
+            precip_score = 1.0
+        elif precip <= max_precip * 2:
+            precip_score = 0.3
+        else:
+            precip_score = 0.1
+        scores.append(precip_score)
+        weights.append(0.25)
+        
+        # Cloud cover score
+        clouds = weather_data.get('cloud_cover_pct', 0)
+        max_clouds = constraints.get('max_cloud_cover_pct', 50)
+        if clouds <= max_clouds * 0.5:
+            cloud_score = 1.0
+        elif clouds <= max_clouds:
+            cloud_score = 0.7
+        else:
+            cloud_score = 0.3
+        scores.append(cloud_score)
+        weights.append(0.15)
+        
+        # Visibility score
+        visibility = weather_data.get('visibility_m', 10000)
+        min_visibility = constraints.get('min_visibility_m', 5000)
+        if visibility >= min_visibility * 2:
+            vis_score = 1.0
+        elif visibility >= min_visibility:
+            vis_score = 0.8
+        else:
+            vis_score = 0.4
+        scores.append(vis_score)
+        weights.append(0.1)
+        
+        # Calculate weighted average
+        weighted_score = sum(s * w for s, w in zip(scores, weights)) / sum(weights)
+        return max(0.1, min(1.0, weighted_score))
