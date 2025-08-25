@@ -502,14 +502,24 @@ class TrajectoryCalculator:
             # Calculate weather score (0.0 to 1.0 based on how good conditions are)
             weather_score = self._calculate_weather_score(closest_weather, weather_constraints)
             
-            # Enhanced window scoring with multiple factors
+            # Enhanced window scoring with additive bonuses instead of multiplicative penalties
             base_score = trajectory.success_probability
-            mission_bonus = 1.0 if trajectory.mission_objectives_met else 0.1
-            constraint_bonus = 1.0 if trajectory.launch_constraints_met else 0.1
             
-            # Composite score with orbital timing and weather quality
-            window_score = (base_score * mission_bonus * constraint_bonus * 
-                          orbital_bonus * weather_score)
+            # Mission bonus (additive)
+            mission_bonus = 0.05 if trajectory.mission_objectives_met else -0.15
+            
+            # Constraint bonus (less harsh penalty)
+            constraint_bonus = 0.0 if trajectory.launch_constraints_met else -0.20
+            
+            # Orbital timing bonus (smaller impact)
+            orbital_timing_bonus = (orbital_bonus - 1.0) * 0.1  # Convert 1.15 -> +0.015
+            
+            # Weather quality bonus (smaller impact)
+            weather_quality_bonus = (weather_score - 0.8) * 0.2  # Convert 0.8-1.0 range to bonus
+            
+            # Composite score using additive approach
+            window_score = base_score + mission_bonus + constraint_bonus + orbital_timing_bonus + weather_quality_bonus
+            window_score = max(0.0, min(1.0, window_score))  # Clamp between 0 and 1
             
             launch_windows.append({
                 'launch_time': current_time,
