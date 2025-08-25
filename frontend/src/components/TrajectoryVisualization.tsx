@@ -22,10 +22,12 @@ function Earth({ radius = 1 }: EarthProps) {
   return (
     <Sphere ref={meshRef} args={[radius, 64, 32]} position={[0, 0, 0]} rotation={[0, -0.3, 0]}>
       <meshStandardMaterial
-        color="#4444aa"
+        color="#4a90e2" // Brighter, more Earth-like blue
         transparent={false}
-        roughness={0.8}
-        metalness={0.1}
+        roughness={0.6} // Less rough for more reflection
+        metalness={0.0}
+        emissive="#1a3d5c" // Slight glow
+        emissiveIntensity={0.1}
       />
     </Sphere>
   );
@@ -177,10 +179,10 @@ function USLandmass() {
   return (
     <Line
       points={points}
-      color="#88ff88"
-      lineWidth={3}
+      color="#00ff66" // Brighter green
+      lineWidth={4}
       transparent
-      opacity={0.8}
+      opacity={0.9}
     />
   );
 }
@@ -242,8 +244,10 @@ function TrajectoryPath({ trajectoryData }: TrajectoryPathProps) {
   return (
     <Line
       points={points}
-      color="#00ff88"
-      lineWidth={5}
+      color="#ffaa00" // Bright orange for trajectory
+      lineWidth={6}
+      transparent
+      opacity={0.95}
     />
   );
 }
@@ -303,31 +307,38 @@ const TrajectoryVisualization: React.FC<TrajectoryVisualizationProps> = ({
             </div>
           ))}
           <div className="flex items-center gap-2 mt-2 pt-1 border-t border-gray-600">
-            <div className="w-3 h-1 bg-green-300 opacity-60"></div>
+            <div className="w-3 h-1 bg-green-400"></div>
             <span>US Landmass</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-3 h-1 bg-green-400"></div>
+            <div className="w-3 h-1 bg-orange-400"></div>
             <span>Launch Trajectory</span>
           </div>
         </div>
       </div>
       
       <Canvas
-        camera={{ position: [1.5, 0.3, 1.2], fov: 75 }}
-        style={{ background: '#000000' }}
+        camera={{ position: [-0.8, 0.5, 1.8], fov: 60 }}
+        style={{ background: '#111827' }} // Dark blue-gray instead of pure black
       >
         <OrbitControls 
           enablePan={true} 
           enableZoom={true} 
           enableRotate={true}
-          target={[0, 0.15, 0]} // Center on US latitude
+          target={[0, 0.1, 0]} // Center on US latitude
+          minDistance={1.5}
+          maxDistance={8}
         />
         
-        <ambientLight intensity={0.3} />
-        <pointLight position={[10, 10, 10]} intensity={0.8} />
+        {/* Much brighter lighting for better visibility */}
+        <ambientLight intensity={0.6} />
+        <directionalLight position={[5, 5, 5]} intensity={1.2} castShadow />
+        <pointLight position={[-5, 3, 5]} intensity={0.8} color="#ffffff" />
+        <hemisphereLight 
+          args={['#87ceeb', '#654321', 0.4]} // Sky blue top, ground brown bottom
+        />
         
-        <Stars radius={100} depth={50} count={1000} factor={4} saturation={0} fade />
+        <Stars radius={100} depth={50} count={1500} factor={6} saturation={0.1} fade speed={0.5} />
         
         <Earth />
         <USLandmass />
