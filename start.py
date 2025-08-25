@@ -26,8 +26,8 @@ if os.path.exists('src'):
         print(f"  src/{item}")
 
 try:
-    # Import and run the Flask app
-    from src.api.app import app
+    # Import and run the Flask app with database integration
+    from src.api.app_db import app
     
     port = int(os.environ.get('PORT', 8000))
     print(f"\nStarting Flask app on port {port}")

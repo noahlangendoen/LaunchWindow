@@ -10,3 +10,5 @@ Requests==2.32.5
 scikit_learn==1.7.1
 seaborn==0.13.2
 xgboost==3.0.4
+SQLAlchemy==2.0.34
+psycopg2-binary==2.9.9
