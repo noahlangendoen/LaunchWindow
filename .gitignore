@@ -70,6 +70,20 @@ data/raw/
 data/cache/
 data/processed/
 
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+data/weather_cache.db
+
+# Screenshots and images (unless explicitly needed)
+data/*.png
+data/*.jpg
+data/*.jpeg
+*.png
+*.jpg
+*.jpeg
+
 # ===============================================
 # NODE.JS / FRONTEND
 # ===============================================
@@ -172,7 +186,7 @@ id_dsa
 # ===============================================
 
 # Keep CLAUDE.md in version control for now
-CLAUDE.md
+# CLAUDE.md
 
 # Batch files that might contain secrets
 start_with_keys.bat

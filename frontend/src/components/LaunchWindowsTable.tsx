@@ -64,7 +64,7 @@ const LaunchWindowsTable: React.FC<LaunchWindowsTableProps> = ({
     };
   };
 
-  const getWeatherConstraints = (weather: any, goForLaunch: boolean) => {
+  const getWeatherConstraints = (weather: any) => {
     const constraints = [
       {
         name: 'Wind Speed',
@@ -114,7 +114,7 @@ const LaunchWindowsTable: React.FC<LaunchWindowsTableProps> = ({
   };
 
   const getFailureReasons = (weather: any) => {
-    const constraints = getWeatherConstraints(weather, false);
+    const constraints = getWeatherConstraints(weather);
     const failures = constraints.filter(c => !c.status);
     
     if (failures.length === 0) return "Weather constraints satisfied";
@@ -147,7 +147,7 @@ const LaunchWindowsTable: React.FC<LaunchWindowsTableProps> = ({
               const { date, time } = formatDateTime(window.launch_time);
               const scoreColor = getWindowScoreColor(window.window_score);
               const scoreText = getWindowScoreText(window.window_score);
-              const constraints = getWeatherConstraints(window.weather_conditions, window.go_for_launch);
+              const constraints = getWeatherConstraints(window.weather_conditions);
               const isExpanded = expandedRow === index;
               
               return (

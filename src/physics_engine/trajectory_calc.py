@@ -390,13 +390,52 @@ class TrajectoryCalculator:
         fuel_remaining = vehicle_specs.fuel_mass_kg - fuel_consumed
         if fuel_remaining > vehicle_specs.fuel_mass_kg * 0.1:
             success_scores.append(0.95)
-            success_weights.append(0.2)
+            success_weights.append(0.15)
         elif fuel_remaining > 0:
             success_scores.append(0.7)
-            success_weights.append(0.2)
+            success_weights.append(0.15)
         else:
             success_scores.append(0.3)
-            success_weights.append(0.2)
+            success_weights.append(0.15)
+            
+        # Weather impact score - new addition
+        weather_score = 1.0
+        wind_speed = weather_data.get('wind_speed_ms', 0)
+        rain_mm = weather_data.get('rain_1h_mm', 0) + weather_data.get('rain_3h_mm', 0)
+        cloud_cover = weather_data.get('cloud_cover_percent', 0)
+        temp_c = weather_data.get('temperature_c', 20)
+        
+        # Wind impact on trajectory accuracy
+        if wind_speed > 15:
+            weather_score *= 0.6  # High winds significantly affect trajectory
+        elif wind_speed > 10:
+            weather_score *= 0.8
+        elif wind_speed > 5:
+            weather_score *= 0.95
+            
+        # Rain/precipitation impact on aerodynamics and visibility
+        if rain_mm > 2:
+            weather_score *= 0.4  # Heavy rain affects aerodynamics
+        elif rain_mm > 0.5:
+            weather_score *= 0.7
+        elif rain_mm > 0.1:
+            weather_score *= 0.9
+            
+        # Cloud cover affects visibility and icing risk
+        if cloud_cover > 90:
+            weather_score *= 0.85  # High cloud cover increases risks
+        elif cloud_cover > 70:
+            weather_score *= 0.95
+            
+        # Temperature extremes affect fuel performance
+        if temp_c < -5 or temp_c > 35:
+            weather_score *= 0.9  # Extreme temps affect fuel efficiency
+        elif temp_c < 0 or temp_c > 30:
+            weather_score *= 0.98
+        
+        # Add weather score to success calculation
+        success_scores.append(weather_score)
+        success_weights.append(0.2)
             
         success_probability = sum(s * w for s, w in zip(success_scores, success_weights)) / sum(success_weights)
 
