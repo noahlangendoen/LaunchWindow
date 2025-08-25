@@ -398,40 +398,39 @@ class TrajectoryCalculator:
             success_scores.append(0.3)
             success_weights.append(0.15)
             
-        # Weather impact score - new addition
+        # Weather impact score with more sensitivity for small variations
         weather_score = 1.0
         wind_speed = weather_data.get('wind_speed_ms', 0)
         rain_mm = weather_data.get('rain_1h_mm', 0) + weather_data.get('rain_3h_mm', 0)
         cloud_cover = weather_data.get('cloud_cover_percent', 0)
         temp_c = weather_data.get('temperature_c', 20)
         
-        # Wind impact on trajectory accuracy
-        if wind_speed > 15:
-            weather_score *= 0.6  # High winds significantly affect trajectory
-        elif wind_speed > 10:
-            weather_score *= 0.8
-        elif wind_speed > 5:
-            weather_score *= 0.95
+        # More granular wind impact (sensitive to small changes)
+        wind_factor = max(0.7, 1.0 - (wind_speed / 20.0))  # Linear decrease from 1.0 to 0.7
+        weather_score *= wind_factor
             
-        # Rain/precipitation impact on aerodynamics and visibility
+        # Rain/precipitation impact
         if rain_mm > 2:
-            weather_score *= 0.4  # Heavy rain affects aerodynamics
+            weather_score *= 0.4
         elif rain_mm > 0.5:
             weather_score *= 0.7
         elif rain_mm > 0.1:
             weather_score *= 0.9
             
-        # Cloud cover affects visibility and icing risk
-        if cloud_cover > 90:
-            weather_score *= 0.85  # High cloud cover increases risks
-        elif cloud_cover > 70:
-            weather_score *= 0.95
+        # Cloud cover impact (more sensitive)
+        cloud_factor = max(0.8, 1.0 - (cloud_cover / 150.0))  # Linear decrease
+        weather_score *= cloud_factor
             
-        # Temperature extremes affect fuel performance
-        if temp_c < -5 or temp_c > 35:
-            weather_score *= 0.9  # Extreme temps affect fuel efficiency
-        elif temp_c < 0 or temp_c > 30:
-            weather_score *= 0.98
+        # Temperature impact (more sensitive to variations)
+        optimal_temp = 20.0
+        temp_deviation = abs(temp_c - optimal_temp)
+        temp_factor = max(0.85, 1.0 - (temp_deviation / 50.0))
+        weather_score *= temp_factor
+        
+        # Add time-of-day variation for atmospheric conditions  
+        hour = launch_time.hour
+        time_factor = 1.0 + 0.02 * math.sin((hour - 12) * math.pi / 12)  # ±2% variation
+        weather_score *= time_factor
         
         # Add weather score to success calculation
         success_scores.append(weather_score)
@@ -502,23 +501,21 @@ class TrajectoryCalculator:
             # Calculate weather score (0.0 to 1.0 based on how good conditions are)
             weather_score = self._calculate_weather_score(closest_weather, weather_constraints)
             
-            # Enhanced window scoring with additive bonuses instead of multiplicative penalties
+            # Window scoring should closely match success probability with small adjustments
             base_score = trajectory.success_probability
             
-            # Mission bonus (additive)
-            mission_bonus = 0.05 if trajectory.mission_objectives_met else -0.15
+            # Small adjustments that don't drastically change the score
+            mission_adjustment = 0.02 if trajectory.mission_objectives_met else -0.05
+            constraint_adjustment = 0.01 if trajectory.launch_constraints_met else -0.03
             
-            # Constraint bonus (less harsh penalty)
-            constraint_bonus = 0.0 if trajectory.launch_constraints_met else -0.20
+            # Orbital timing adjustment (very small)
+            orbital_adjustment = (orbital_bonus - 1.0) * 0.05  # ±2.5% max
             
-            # Orbital timing bonus (smaller impact)
-            orbital_timing_bonus = (orbital_bonus - 1.0) * 0.1  # Convert 1.15 -> +0.015
+            # Weather quality adjustment (small)
+            weather_adjustment = (weather_score - 0.95) * 0.1  # Small bonus for great weather
             
-            # Weather quality bonus (smaller impact)
-            weather_quality_bonus = (weather_score - 0.8) * 0.2  # Convert 0.8-1.0 range to bonus
-            
-            # Composite score using additive approach
-            window_score = base_score + mission_bonus + constraint_bonus + orbital_timing_bonus + weather_quality_bonus
+            # Window score should be very close to success probability
+            window_score = base_score + mission_adjustment + constraint_adjustment + orbital_adjustment + weather_adjustment
             window_score = max(0.0, min(1.0, window_score))  # Clamp between 0 and 1
             
             launch_windows.append({
