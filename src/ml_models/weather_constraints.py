@@ -253,7 +253,7 @@ class WeatherConstraintChecker:
                 max_wind_speed_ms=15.0,
                 max_wind_gust_ms=20.0,
                 min_temperature_c=-5.0,    # Coastal California climate
-                max_temperature_c=30.0,
+                max_temperature_c=35.0,    # Adjusted to be more realistic for coastal California
                 max_precipitation_mm=0.1
             ),
             'CCAFS': WeatherConstraints(
