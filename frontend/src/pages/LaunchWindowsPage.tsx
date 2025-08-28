@@ -93,11 +93,14 @@ const LaunchWindowsPage: React.FC = () => {
     let bestScore = 0;
     
     Object.entries(launchWindows).forEach(([siteCode, windows]) => {
-      if (windows.length > 0 && windows[0].window_score > bestScore) {
-        bestWindow = windows[0];
-        bestSite = siteCode;
-        bestScore = windows[0].window_score;
-      }
+      // Find the highest scoring window in this site, regardless of GO status
+      windows.forEach(window => {
+        if (window.window_score > bestScore) {
+          bestWindow = window;
+          bestSite = siteCode;
+          bestScore = window.window_score;
+        }
+      });
     });
     
     return bestWindow ? { window: bestWindow, siteCode: bestSite } : null;
