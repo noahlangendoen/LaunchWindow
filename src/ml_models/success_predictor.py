@@ -252,10 +252,10 @@ class LaunchSuccessPredictor:
         # Combined success probability (weighted combination)
         if weather_assessment.go_for_launch:
             # Weather OK - use ML prediction modulated by weather quality
-            combined_success_prob = ml_success_prob * (0.7 + 0.3 * weather_score)
+            combined_success_prob = ml_success_prob * (0.8 + 0.2 * weather_score)
         else:
-            # Weather constraints violated - significantly reduce probability
-            combined_success_prob = ml_success_prob * 0.1 * weather_score
+            # Weather constraints violated - reduce probability but not drastically
+            combined_success_prob = ml_success_prob * 0.4 * weather_score
             
         # Determine overall recommendation
         if not weather_assessment.go_for_launch:

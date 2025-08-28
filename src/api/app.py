@@ -151,21 +151,19 @@ def run_prediction():
         if not weather:
             return jsonify({'error': 'No weather data available'}), 400
         
-        # Create prediction features (weather-independent for ML model)
+        # Create prediction features including weather data for ML model
         import pandas as pd
         launch_features = pd.DataFrame([{
-            'rocket_name': demo.demo_vehicle.name,
-            'mission_type': 'Commercial',
+            'flight_number': 100,  # Example flight number
             'payload_mass_kg': 15000,
-            'launch_provider': 'SpaceX',  # Example provider
-            'is_commercial': True,
-            'is_reusable': True,
-            'mission_complexity': 2,  # Commercial satellite deployment
-            'payload_category': 'Heavy',  # 15000 kg
             'launch_year': datetime.now().year,
             'launch_month': datetime.now().month,
+            'launch_day_of_year': datetime.now().timetuple().tm_yday,
             'launch_hour': datetime.now().hour,
-            'launch_day_of_week': datetime.now().weekday()
+            'launch_day_of_week': datetime.now().weekday(),
+            'weather_temperature_c': weather.get('temperature_c', 20),
+            'weather_wind_speed_ms': weather.get('wind_speed_ms', 5),
+            'orbital_congestion_score': 0.1  # Low congestion score
         }])
         
         # Use combined ML + weather constraint prediction
